@@ -9,6 +9,8 @@ class PacketTableModel(QAbstractTableModel):
 
     cols = ["Packet Index", "Timestamp", "PID", "Length", "Data"]
 
+    INDEX, TIMESTAMP, PID, LENGTH, DATA = range(5)
+
     pid_names = [
             "RSVD", "OUT", "ACK", "DATA0",
             "PING", "SOF", "NYET", "DATA2",
@@ -36,19 +38,26 @@ class PacketTableModel(QAbstractTableModel):
     def data(self, index, role):
         if not index.isValid() or role != Qt.DisplayRole:
             return None
+
         row = index.row()
         col = index.column()
-        if col == 0:
+
+        if col == self.INDEX:
             return row
+
         packet = self.capture.packets[row]
-        if col == 1:
+
+        if col == self.TIMESTAMP:
             offset_ns = packet.timestamp_ns - self.capture.packets[0].timestamp_ns
             return "%.9f" % (offset_ns / 1e9)
-        elif col == 2:
+
+        if col == self.PID:
             return self.pid_names[packet.pid & 0b1111]
-        elif col == 3:
+
+        if col == self.LENGTH:
             return packet.length
-        elif col == 4:
+
+        if col == self.DATA:
             if packet.pid & PID_TYPE_MASK != DATA:
                 return None
             start = packet.data_offset
