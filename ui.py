@@ -3,6 +3,7 @@ from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import Qt, QAbstractTableModel
 
 import interface
+import sys
 
 class PacketTableModel(QAbstractTableModel):
 
@@ -16,7 +17,10 @@ class PacketTableModel(QAbstractTableModel):
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.capture = interface.load_capture()
+        if len(sys.argv) < 2:
+            self.capture = interface.load_capture()
+        else:
+            self.capture = interface.convert_capture(sys.argv[1].encode('ascii'))
 
     def rowCount(self, parent):
         return self.capture.num_packets

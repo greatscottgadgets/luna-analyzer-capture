@@ -54,3 +54,4 @@ struct capture {
 };
 
 struct capture* load_capture(void);
+struct capture* convert_capture(const char *filename);
