@@ -117,6 +117,10 @@ struct capture* convert_capture(const char *filename)
 		cap->num_packets++;
 	}
 
+	// Flush buffered writes.
+	fflush(metadata_file);
+	fflush(data_file);
+
 	// Map packet metadata
 	int metadata_fd = fileno(metadata_file);
 	size_t metadata_bytes = cap->num_packets * sizeof(struct packet);
