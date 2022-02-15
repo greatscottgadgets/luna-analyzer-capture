@@ -2,9 +2,12 @@ DEPS = libusb-1.0 libpcap
 CFLAGS = -g -Wall $(shell pkg-config --cflags $(DEPS))
 LIBS = $(shell pkg-config --libs $(DEPS))
 
-all: capture luna2pcap convert
+all: capture luna2pcap convert library.so
 
 convert: packet.h
 
 %: %.c Makefile
 	gcc $(CFLAGS) $< $(LIBS) -o $@
+
+%.so: %.c Makefile
+	gcc -shared $(CFLAGS) $< $(LIBS) -o $@

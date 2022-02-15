@@ -6,7 +6,7 @@
 #include <time.h>
 #include <arpa/inet.h>
 
-#include "packet.h"
+#include "library.h"
 
 // Time as nanoseconds since Unix epoch (good for next 500 years).
 static inline uint64_t nanotime(void)
