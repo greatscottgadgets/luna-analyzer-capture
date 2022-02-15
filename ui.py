@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QHeaderView
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import Qt, QAbstractTableModel
 
@@ -52,7 +52,10 @@ app = QApplication.instance() or QApplication([])
 ui = QUiLoader().load('packets.ui')
 model = PacketTableModel(app)
 ui.tableView.setModel(model)
-ui.tableView.horizontalHeader().setVisible(True)
+header = ui.tableView.horizontalHeader()
+header.setVisible(True)
+header.setSectionResizeMode(QHeaderView.ResizeToContents)
+header.setStretchLastSection(True)
 ui.tableView.show()
 ui.show()
 app.exec()
