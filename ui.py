@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QApplication, QHeaderView
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import Qt, QAbstractTableModel
+from PySide6.QtCore import Qt, QCoreApplication, QAbstractTableModel
 
 from interface import *
 import sys
@@ -65,6 +65,7 @@ class PacketTableModel(QAbstractTableModel):
             packet_data = self.capture.data[start:end]
             return str.join(" ", ("%02X" % byte for byte in packet_data))
 
+QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 app = QApplication.instance() or QApplication([])
 ui = QUiLoader().load('packets.ui')
 model = PacketTableModel(app)
