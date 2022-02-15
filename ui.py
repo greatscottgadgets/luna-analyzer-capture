@@ -7,7 +7,7 @@ import sys
 
 class PacketTableModel(QAbstractTableModel):
 
-    cols = ["Index", "Timestamp", "PID", "Length", "Data"]
+    cols = ["Packet Index", "Timestamp", "PID", "Length", "Data"]
 
     pid_names = [
             "RSVD", "OUT", "ACK", "DATA0",
