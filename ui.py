@@ -42,7 +42,8 @@ class PacketTableModel(QAbstractTableModel):
             return row
         packet = self.capture.packets[row]
         if col == 1:
-            return packet.timestamp_ns
+            offset_ns = packet.timestamp_ns - self.capture.packets[0].timestamp_ns
+            return "%.9f" % (offset_ns / 1e9)
         elif col == 2:
             return self.pid_names[packet.pid & 0b1111]
         elif col == 3:
