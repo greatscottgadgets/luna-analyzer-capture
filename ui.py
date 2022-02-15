@@ -2,12 +2,12 @@ from PySide6.QtWidgets import QApplication, QHeaderView
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import Qt, QAbstractTableModel
 
-import interface
+from interface import *
 import sys
 
 class PacketTableModel(QAbstractTableModel):
 
-    cols = ["Index", "Timestamp", "PID", "Length"]
+    cols = ["Index", "Timestamp", "PID", "Length", "Data"]
 
     pid_names = [
             "RSVD", "OUT", "ACK", "DATA0",
@@ -18,9 +18,9 @@ class PacketTableModel(QAbstractTableModel):
     def __init__(self, parent):
         super().__init__(parent)
         if len(sys.argv) < 2:
-            self.capture = interface.load_capture()
+            self.capture = load_capture()
         else:
-            self.capture = interface.convert_capture(sys.argv[1].encode('ascii'))
+            self.capture = convert_capture(sys.argv[1].encode('ascii'))
 
     def rowCount(self, parent):
         return self.capture.num_packets
@@ -47,6 +47,13 @@ class PacketTableModel(QAbstractTableModel):
             return self.pid_names[packet.pid & 0b1111]
         elif col == 3:
             return packet.length
+        elif col == 4:
+            if packet.pid & PID_TYPE_MASK != DATA:
+                return None
+            start = packet.data_offset
+            end = packet.data_offset + packet.length
+            packet_data = self.capture.data[start:end]
+            return str.join(" ", ("%02X" % byte for byte in packet_data))
 
 app = QApplication.instance() or QApplication([])
 ui = QUiLoader().load('packets.ui')
