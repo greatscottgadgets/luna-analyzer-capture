@@ -26,6 +26,7 @@ enum pid {
 	MDATA	= 0x0F,
 };
 
+#pragma pack(1)
 struct packet {
 	uint64_t timestamp_ns;
 	uint64_t data_offset;
