@@ -4,7 +4,6 @@ LIBS = $(shell pkg-config --libs $(DEPS))
 
 all: capture luna2pcap library.so
 
-convert: library.h
 library.so: library.h
 
 %: %.c Makefile
