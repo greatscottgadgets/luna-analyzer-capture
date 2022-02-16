@@ -5,21 +5,21 @@ from PySide6.QtCore import Qt, QCoreApplication, QAbstractTableModel
 from interface import *
 import sys
 
+pid_names = [
+        "RSVD", "OUT", "ACK", "DATA0",
+        "PING", "SOF", "NYET", "DATA2",
+        "SPLIT", "IN", "NAK", "DATA1",
+        "ERR", "SETUP", "STALL", "MDATA"]
+
 class PacketTableModel(QAbstractTableModel):
 
     cols = ["Packet Index", "Timestamp", "Addr", "EP", "PID", "Length", "Data"]
 
     INDEX, TIMESTAMP, ADDR, EP, PID, LENGTH, DATA = range(7)
 
-    pid_names = [
-            "RSVD", "OUT", "ACK", "DATA0",
-            "PING", "SOF", "NYET", "DATA2",
-            "SPLIT", "IN", "NAK", "DATA1",
-            "ERR", "SETUP", "STALL", "MDATA"]
-
-    def __init__(self, parent):
+    def __init__(self, parent, capture):
         super().__init__(parent)
-        self.capture = convert_capture(sys.argv[1].encode('ascii'))
+        self.capture = capture
 
     def rowCount(self, parent):
         return self.capture.num_packets
@@ -59,7 +59,7 @@ class PacketTableModel(QAbstractTableModel):
             return None
 
         if col == self.PID:
-            return self.pid_names[packet.pid & 0b1111]
+            return pid_names[packet.pid & 0b1111]
 
         if col == self.LENGTH:
             return packet.length
@@ -72,15 +72,87 @@ class PacketTableModel(QAbstractTableModel):
             packet_data = self.capture.data[start:end]
             return str.join(" ", ("%02X" % byte for byte in packet_data))
 
+
+class TransactionTableModel(QAbstractTableModel):
+
+    cols = ["Transaction Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Packets", "Data Bytes", "Data"]
+
+    INDEX, TIMESTAMP, DURATION, TYPE, ADDR, EP, PACKETS, DATA_BYTES, DATA = range(9)
+
+    def __init__(self, parent, capture):
+        super().__init__(parent)
+        self.capture = capture
+
+    def rowCount(self, parent):
+        return self.capture.num_transactions
+
+    def columnCount(self, parent):
+        return len(self.cols)
+
+    def headerData(self,section, orientation, role):
+        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
+            return self.cols[section]
+        return None
+
+    def data(self, index, role):
+        if not index.isValid() or role != Qt.DisplayRole:
+            return None
+
+        row = index.row()
+        col = index.column()
+
+        if col == self.INDEX:
+            return row
+
+        transaction = self.capture.transactions[row]
+        start = transaction.first_packet_index
+        end = start + transaction.num_packets
+        packets = self.capture.packets[start:end]
+
+        if col == self.TIMESTAMP:
+            offset_ns = packets[0].timestamp_ns - self.capture.packets[0].timestamp_ns
+            return "%.9f" % (offset_ns / 1e9)
+
+        if col == self.DURATION:
+            return packets[transaction.num_packets - 1].timestamp_ns - packets[0].timestamp_ns
+
+        if col == self.TYPE:
+            return pid_names[packets[0].pid & 0b1111]
+
+        if col == self.ADDR:
+            return packets[0].fields.token.address
+
+        if col == self.EP:
+            return packets[0].fields.token.endpoint
+
+        if col == self.PACKETS:
+            return transaction.num_packets
+
+        data_valid = transaction.num_packets > 1 and packets[1].pid & PID_TYPE_MASK == DATA
+        data_packet = packets[1]
+
+        if col == self.DATA_BYTES and data_valid:
+            return data_packet.length - 3
+
+        if col == self.DATA and data_valid:
+            start = data_packet.data_offset
+            end = start + data_packet.length - 3
+            packet_data = self.capture.data[start:end]
+            return str.join(" ", ("%02X" % byte for byte in packet_data))
+
+capture = convert_capture(sys.argv[1].encode('ascii'))
 QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 app = QApplication.instance() or QApplication([])
-ui = QUiLoader().load('packets.ui')
-model = PacketTableModel(app)
-ui.tableView.setModel(model)
-header = ui.tableView.horizontalHeader()
-header.setVisible(True)
-header.setSectionResizeMode(QHeaderView.ResizeToContents)
-header.setStretchLastSection(True)
-ui.tableView.show()
+ui = QUiLoader().load('analyzer.ui')
+for modelClass, view in (
+        (PacketTableModel, ui.packetView),
+        (TransactionTableModel, ui.transactionView)):
+    model = modelClass(app, capture)
+    view.setModel(model)
+    header = view.horizontalHeader()
+    header.setVisible(True)
+    header.setSectionResizeMode(QHeaderView.ResizeToContents)
+    header.setStretchLastSection(True)
+    view.show()
 ui.show()
 app.exec()
