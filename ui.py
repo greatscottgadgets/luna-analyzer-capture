@@ -75,9 +75,9 @@ class PacketTableModel(QAbstractTableModel):
 
 class TransactionTableModel(QAbstractTableModel):
 
-    cols = ["Transaction Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Packets", "Data Bytes", "Data"]
+    cols = ["Transaction Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Packets", "Result", "Data Bytes", "Data"]
 
-    INDEX, TIMESTAMP, DURATION, TYPE, ADDR, EP, PACKETS, DATA_BYTES, DATA = range(9)
+    INDEX, TIMESTAMP, DURATION, TYPE, ADDR, EP, PACKETS, RESULT, DATA_BYTES, DATA = range(10)
 
     def __init__(self, parent, capture):
         super().__init__(parent)
@@ -129,6 +129,12 @@ class TransactionTableModel(QAbstractTableModel):
 
         if col == self.PACKETS:
             return transaction.num_packets
+
+        if col == self.RESULT:
+            if not transaction.complete:
+                return "INCOMPLETE"
+            else:
+                return pid_names[last_packet.pid & 0b1111]
 
         data_valid = transaction.num_packets > 1 and packets[1].pid & PID_TYPE_MASK == DATA
         data_packet = packets[1]
