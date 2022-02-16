@@ -2,7 +2,7 @@ DEPS = libusb-1.0 libpcap
 CFLAGS = -g -Wall $(shell pkg-config --cflags $(DEPS))
 LIBS = $(shell pkg-config --libs $(DEPS))
 
-all: capture luna2pcap convert library.so
+all: capture luna2pcap library.so
 
 convert: library.h
 library.so: library.h

@@ -54,5 +54,4 @@ struct capture {
 	uint8_t *data;
 };
 
-struct capture* load_capture(void);
 struct capture* convert_capture(const char *filename);

@@ -19,10 +19,7 @@ class PacketTableModel(QAbstractTableModel):
 
     def __init__(self, parent):
         super().__init__(parent)
-        if len(sys.argv) < 2:
-            self.capture = load_capture()
-        else:
-            self.capture = convert_capture(sys.argv[1].encode('ascii'))
+        self.capture = convert_capture(sys.argv[1].encode('ascii'))
 
     def rowCount(self, parent):
         return self.capture.num_packets
