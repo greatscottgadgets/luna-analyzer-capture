@@ -37,10 +37,10 @@ struct capture* convert_capture(const char *filename)
 	// Open input file
 	FILE* input_file = fopen(filename, "r");
 
-	// File for packet metadata
-	FILE* metadata_file = fdopen(memfd_create("luna_metadata", 0), "r+");
+	// File for packets
+	FILE* packet_file = fdopen(memfd_create("luna_packet", 0), "r+");
 
-	// File for packet data
+	// File for data
 	FILE* data_file = fdopen(memfd_create("luna_data", 0), "r+");
 
 	while (1)
@@ -64,19 +64,19 @@ struct capture* convert_capture(const char *filename)
 		bool pkt_is_data = (buf[0] & PID_TYPE_MASK) == DATA;
 
 		if (pkt_is_data) {
-			// Store PID in metadata
+			// Store PID in packet
 			pkt.pid = buf[0];
-			// Store CRC in metadata
+			// Store CRC in packet
 			memcpy(&pkt.fields.data.crc, &buf[pkt.length - 2], 2);
 			// Store data bytes in separate file
 			fwrite(&buf[1], 1, pkt.length - 3, data_file);
 		} else {
-			// Store all packet fields as metadata
+			// Store all fields in packet
 			memcpy(&pkt.pid, buf, pkt.length);
 		}
 
-		// Write out metadata
-		fwrite(&pkt, 1, sizeof(pkt), metadata_file);
+		// Write out packet
+		fwrite(&pkt, 1, sizeof(pkt), packet_file);
 
 		// If packet contained data, update offset.
 		if (pkt_is_data)
@@ -87,13 +87,13 @@ struct capture* convert_capture(const char *filename)
 	}
 
 	// Flush buffered writes.
-	fflush(metadata_file);
+	fflush(packet_file);
 	fflush(data_file);
 
-	// Map packet metadata
-	int metadata_fd = fileno(metadata_file);
-	size_t metadata_bytes = cap->num_packets * sizeof(struct packet);
-	cap->packets = mmap(NULL, metadata_bytes, PROT_READ, MAP_SHARED, metadata_fd, 0);
+	// Map packets
+	int packet_fd = fileno(packet_file);
+	size_t packet_bytes = cap->num_packets * sizeof(struct packet);
+	cap->packets = mmap(NULL, packet_bytes, PROT_READ, MAP_SHARED, packet_fd, 0);
 
 	// Map data
 	int data_fd = fileno(data_file);
