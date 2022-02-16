@@ -120,6 +120,16 @@ transaction_update(enum pid first, enum pid last, enum pid next)
 	return TRANSACTION_INVALID;
 }
 
+// A virtual file used for capture data.
+struct virtual_file {
+	const char *name;
+	uint64_t *count_ptr;
+	size_t item_size;
+	int fd;
+	FILE *file;
+	void *map;
+};
+
 struct capture* convert_capture(const char *filename)
 {
 	// Allocate new capture
@@ -140,14 +150,18 @@ struct capture* convert_capture(const char *filename)
 	// Open input file
 	FILE* input_file = fopen(filename, "r");
 
-	// File for packets
-	FILE* packet_file = fdopen(memfd_create("luna_packet", 0), "r+");
+	// Virtual files used for capture data
+	struct virtual_file packets = {"packets", &cap->num_packets, sizeof(pkt)};
+	struct virtual_file transactions = {"transactions", &cap->num_transactions, sizeof(tran)};
+	struct virtual_file data = {"data", &pkt.data_offset, 1};
+	struct virtual_file *files[] = {&packets, &transactions, &data};
+	int num_files = 3;
 
-	// File for transactions
-	FILE* transaction_file = fdopen(memfd_create("luna_transaction", 0), "r+");
-
-	// File for data
-	FILE* data_file = fdopen(memfd_create("luna_data", 0), "r+");
+	// Open all virtual files.
+	for (int i = 0; i < num_files; i++) {
+		files[i]->fd = memfd_create(files[i]->name, 0);
+		files[i]->file = fdopen(files[i]->fd, "r+");
+	}
 
 	// Used to track transaction state.
 	enum pid first = 0;
@@ -179,14 +193,14 @@ struct capture* convert_capture(const char *filename)
 			// Store CRC in packet
 			memcpy(&pkt.fields.data.crc, &buf[pkt.length - 2], 2);
 			// Store data bytes in separate file
-			fwrite(&buf[1], 1, pkt.length - 3, data_file);
+			fwrite(&buf[1], 1, pkt.length - 3, data.file);
 		} else {
 			// Store all fields in packet
 			memcpy(&pkt.pid, buf, pkt.length);
 		}
 
 		// Write out packet
-		fwrite(&pkt, 1, sizeof(pkt), packet_file);
+		fwrite(&pkt, 1, sizeof(pkt), packets.file);
 
 		// If packet contained data, update offset.
 		if (pkt_is_data)
@@ -201,7 +215,7 @@ struct capture* convert_capture(const char *filename)
 				// A transaction was in progress.
 				// Write it out as incomplete.
 				tran.complete = false;
-				fwrite(&tran, 1, sizeof(tran), transaction_file);
+				fwrite(&tran, 1, sizeof(tran), transactions.file);
 				cap->num_transactions++;
 			}
 			// Packet is first of the new transaction.
@@ -219,7 +233,7 @@ struct capture* convert_capture(const char *filename)
 			// Packet completes current transaction.
 			tran.num_packets++;
 			tran.complete = true;
-			fwrite(&tran, 1, sizeof(tran), transaction_file);
+			fwrite(&tran, 1, sizeof(tran), transactions.file);
 			cap->num_transactions++;
 			// No transaction is now in progress.
 			tran.num_packets = 0;
@@ -232,7 +246,7 @@ struct capture* convert_capture(const char *filename)
 				// A transaction was in progress.
 				// Write it out as incomplete.
 				tran.complete = false;
-				fwrite(&tran, 1, sizeof(tran), transaction_file);
+				fwrite(&tran, 1, sizeof(tran), transactions.file);
 				cap->num_transactions++;
 			}
 			// No transaction is now in progress.
@@ -244,28 +258,23 @@ struct capture* convert_capture(const char *filename)
 
 		// Increment packet count.
 		cap->num_packets++;
-
 	}
 
-	// Flush buffered writes.
-	fflush(packet_file);
-	fflush(transaction_file);
-	fflush(data_file);
+	// Map completed virtual files into address space.
+	for (int i = 0; i < num_files; i++)
+	{
+		// Flush buffered writes.
+		fflush(files[i]->file);
+		// Calculate mapping size.
+		size_t num_bytes = *files[i]->count_ptr * files[i]->item_size;
+		// Create mapping.
+		files[i]->map = mmap(NULL, num_bytes, PROT_READ, MAP_SHARED, files[i]->fd, 0);
+	}
 
-	// Map packets
-	int packet_fd = fileno(packet_file);
-	size_t packet_bytes = cap->num_packets * sizeof(struct packet);
-	cap->packets = mmap(NULL, packet_bytes, PROT_READ, MAP_SHARED, packet_fd, 0);
-
-	// Map transactions
-	int transaction_fd = fileno(transaction_file);
-	size_t transaction_bytes = cap->num_transactions * sizeof(struct transaction);
-	cap->transactions = mmap(NULL, transaction_bytes, PROT_READ, MAP_SHARED, transaction_fd, 0);
-
-	// Map data
-	int data_fd = fileno(data_file);
-	size_t data_bytes = pkt.data_offset;
-	cap->data = mmap(NULL, data_bytes, PROT_READ, MAP_SHARED, data_fd, 0);
+	// Assign mappings to capture.
+	cap->packets = packets.map;
+	cap->transactions = transactions.map;
+	cap->data = data.map;
 
 	return cap;
 }
