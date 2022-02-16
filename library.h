@@ -48,8 +48,16 @@ struct packet {
 	} fields;
 };
 
+struct transaction {
+	uint64_t first_packet_index;
+	uint8_t num_packets;
+	bool complete;
+};
+
 struct capture {
+	uint64_t num_transactions;
 	uint64_t num_packets;
+	struct transaction *transactions;
 	struct packet *packets;
 	uint8_t *data;
 };
