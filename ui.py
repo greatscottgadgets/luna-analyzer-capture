@@ -108,22 +108,24 @@ class TransactionTableModel(QAbstractTableModel):
         start = transaction.first_packet_index
         end = start + transaction.num_packets
         packets = self.capture.packets[start:end]
+        first_packet = packets[0]
+        last_packet = packets[transaction.num_packets - 1]
 
         if col == self.TIMESTAMP:
-            offset_ns = packets[0].timestamp_ns - self.capture.packets[0].timestamp_ns
+            offset_ns = first_packet.timestamp_ns - self.capture.packets[0].timestamp_ns
             return "%.9f" % (offset_ns / 1e9)
 
         if col == self.DURATION:
-            return packets[transaction.num_packets - 1].timestamp_ns - packets[0].timestamp_ns
+            return last_packet.timestamp_ns - first_packet.timestamp_ns
 
         if col == self.TYPE:
-            return pid_names[packets[0].pid & 0b1111]
+            return pid_names[first_packet.pid & 0b1111]
 
         if col == self.ADDR:
-            return packets[0].fields.token.address
+            return first_packet.fields.token.address
 
         if col == self.EP:
-            return packets[0].fields.token.endpoint
+            return first_packet.fields.token.endpoint
 
         if col == self.PACKETS:
             return transaction.num_packets
