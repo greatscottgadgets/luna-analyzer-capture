@@ -7,9 +7,9 @@ import sys
 
 class PacketTableModel(QAbstractTableModel):
 
-    cols = ["Packet Index", "Timestamp", "PID", "Length", "Data"]
+    cols = ["Packet Index", "Timestamp", "Addr", "EP", "PID", "Length", "Data"]
 
-    INDEX, TIMESTAMP, PID, LENGTH, DATA = range(5)
+    INDEX, TIMESTAMP, ADDR, EP, PID, LENGTH, DATA = range(7)
 
     pid_names = [
             "RSVD", "OUT", "ACK", "DATA0",
@@ -50,6 +50,16 @@ class PacketTableModel(QAbstractTableModel):
         if col == self.TIMESTAMP:
             offset_ns = packet.timestamp_ns - self.capture.packets[0].timestamp_ns
             return "%.9f" % (offset_ns / 1e9)
+
+        if col == self.ADDR:
+            if packet.pid in (SETUP, IN, OUT):
+                return packet.fields.token.address
+            return None
+
+        if col == self.EP:
+            if packet.pid in (SETUP, IN, OUT):
+                return packet.fields.token.endpoint
+            return None
 
         if col == self.PID:
             return self.pid_names[packet.pid & 0b1111]
