@@ -21,6 +21,11 @@ struct virtual_file {
 	void *map;
 };
 
+// Transfer decoder state.
+struct transfer_state {
+	enum pid last;
+};
+
 // Transaction decoder state.
 struct transaction_state {
 	enum pid first;
@@ -29,7 +34,8 @@ struct transaction_state {
 
 // Context structure for shared variables needed during decoding.
 struct context {
-	struct virtual_file packets, transactions, data;
+	struct virtual_file packets, transactions, transfers, mappings, data;
+	struct transfer_state transfer_state;
 	struct transaction_state transaction_state;
 };
 
@@ -39,6 +45,150 @@ static inline uint64_t nanotime(void)
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+// Possible transfer statuses after each new transaction.
+enum transfer_status {
+	// Transaction begins a new transfer.
+	TRANSFER_NEW,
+	// Transaction continues the current transfer, with more expected.
+	TRANSFER_CONT,
+	// Transaction completes the current transfer.
+	TRANSFER_DONE,
+	// Transaction not valid in any current transfer.
+	TRANSFER_INVALID,
+};
+
+// Get transfer status based on next transaction for its endpoint.
+static inline enum transfer_status
+transfer_status(enum pid last, enum pid next)
+{
+	// A SETUP transaction starts a new transfer.
+	if (next == SETUP)
+		return TRANSFER_NEW;
+
+	// Otherwise, result depends on last transaction.
+	switch (last)
+	{
+	case SETUP:
+		// SETUP stage must be followed by IN or OUT at data
+		// stage, which will be followed by the status stage.
+		switch (next)
+		{
+		case IN:
+		case OUT:
+			return TRANSFER_CONT;
+		default:
+			break;
+		}
+		break;
+	case IN:
+		// IN at data stage must be followed by OUT at
+		// status stage, completing the transfer.
+		if (next == OUT)
+			return TRANSFER_DONE;
+		break;
+	case OUT:
+		// OUT at data stage must be followed by IN at
+		// status stage, completing the transfer.
+		if (next == IN)
+			return TRANSFER_DONE;
+		break;
+	default:
+		break;
+	}
+
+	// Any other transaction on the same endpoint is invalid.
+	return TRANSFER_INVALID;
+}
+
+// Append a transaction to a transfer.
+static inline void transfer_append(
+	struct context *context,
+	struct capture *cap,
+	struct transfer *xfer,
+	struct transaction *tran)
+{
+	uint64_t tran_idx = cap->num_transactions;
+	fwrite(&tran_idx, 1, sizeof(uint64_t), context->mappings.file);
+	xfer->num_transactions++;
+	cap->num_mappings++;
+}
+
+// End a transfer if it was ongoing.
+static inline void transfer_end(
+	struct context *context,
+	struct capture *cap,
+	struct transfer *xfer,
+	bool complete)
+{
+	if (xfer->num_transactions > 0) {
+		// A transfer was in progress, write it out.
+		xfer->complete = complete;
+		fwrite(xfer, 1, sizeof(struct transfer), context->transfers.file);
+		xfer->mapping_offset += xfer->num_transactions;
+		cap->num_transfers++;
+	}
+}
+
+// Update transfer state based on new transaction on its endpoint.
+static inline void transfer_update(
+	struct context *context,
+	struct capture *cap,
+	struct transfer *xfer,
+	struct transaction *tran)
+{
+	struct transfer_state *state = &context->transfer_state;
+	enum pid transaction_type = context->transaction_state.first;
+
+	// Check effect of this transaction on the transfer state.
+	enum transfer_status status = transfer_status(state->last, transaction_type);
+
+	// A transaction is successful if it has three packets and completed with ACK.
+	bool success =
+		tran->num_packets == 3 &&
+		tran->complete &&
+		context->transaction_state.last == ACK;
+
+	// If a transfer is in progress, and the transaction would have been valid
+	// but was not successful, append it to the transfer without changing state.
+	if (xfer->num_transactions > 0 && status != TRANSFER_INVALID && !success)
+	{
+		transfer_append(context, cap, xfer, tran);
+		return;
+	}
+
+	switch (transfer_status(state->last, transaction_type))
+	{
+	case TRANSFER_NEW:
+		// New transfer. End any previous one as incomplete.
+		transfer_end(context, cap, xfer, false);
+		// Transaction is first of the new transfer.
+		xfer->num_transactions = 0;
+		transfer_append(context, cap, xfer, tran);
+		state->last = transaction_type;
+		break;
+	case TRANSFER_CONT:
+		// Transaction is added to the current transfer.
+		transfer_append(context, cap, xfer, tran);
+		state->last = transaction_type;
+		break;
+	case TRANSFER_DONE:
+		// Transaction completes current transfer.
+		transfer_append(context, cap, xfer, tran);
+		transfer_end(context, cap, xfer, true);
+		// No transfer is now in progress.
+		xfer->num_transactions = 0;
+		state->last = 0;
+		break;
+	case TRANSFER_INVALID:
+		// Transaction not valid as part of any current transfer.
+		transfer_end(context, cap, xfer, false);
+		// No transfer is now in progress.
+		xfer->num_transactions = 0;
+		state->last = 0;
+		break;
+	}
 }
 
 // Possible transaction statuses after each new packet.
@@ -146,13 +296,19 @@ transaction_status(enum pid first, enum pid last, enum pid next)
 static inline void transaction_end(
 	struct context *context,
 	struct capture *cap,
+	struct transfer *xfer,
 	struct transaction *tran,
+	struct packet *pkt,
 	bool complete)
 {
 	if (tran->num_packets > 0) {
 		// A transaction was in progress, write it out.
 		tran->complete = complete;
 		fwrite(tran, 1, sizeof(struct transaction), context->transactions.file);
+		// Update transaction state.
+		context->transaction_state.last = pkt->pid;
+		// Update transfer state.
+		transfer_update(context, cap, xfer, tran);
 		cap->num_transactions++;
 	}
 }
@@ -161,6 +317,7 @@ static inline void transaction_end(
 static inline void transaction_update(
 	struct context *context,
 	struct capture *cap,
+	struct transfer *xfer,
 	struct transaction *tran,
 	struct packet *pkt)
 {
@@ -170,7 +327,7 @@ static inline void transaction_update(
 	{
 	case TRANSACTION_NEW:
 		// New transaction. End any previous one as incomplete.
-		transaction_end(context, cap, tran, false);
+		transaction_end(context, cap, xfer, tran, pkt, false);
 		// Packet is first of the new transaction.
 		tran->first_packet_index = cap->num_packets;
 		tran->num_packets = 1;
@@ -185,7 +342,7 @@ static inline void transaction_update(
 	case TRANSACTION_DONE:
 		// Packet completes current transaction.
 		tran->num_packets++;
-		transaction_end(context, cap, tran, true);
+		transaction_end(context, cap, xfer, tran, pkt, true);
 		// No transaction is now in progress.
 		tran->num_packets = 0;
 		state->first = 0;
@@ -193,7 +350,7 @@ static inline void transaction_update(
 		break;
 	case TRANSACTION_INVALID:
 		// Packet not valid as part of any current transaction.
-		transaction_end(context, cap, tran, false);
+		transaction_end(context, cap, xfer, tran, pkt, false);
 		// No transaction is now in progress.
 		tran->num_packets = 0;
 		state->first = 0;
@@ -206,15 +363,16 @@ struct capture* convert_capture(const char *filename)
 {
 	// Allocate new capture
 	struct capture *cap = malloc(sizeof(struct capture));
-	cap->num_packets = 0;
-	cap->num_transactions = 0;
+	memset(cap, 0, sizeof(struct capture));
 
-	// Metadata structs reused for each packet & transaction
+	// Metadata structs reused for each packet, transaction & transfer.
 	struct packet pkt;
 	struct transaction tran;
+	struct transfer xfer;
 
-	// Data offset starts at zero
+	// Offsets start at zero
 	pkt.data_offset = 0;
+	xfer.mapping_offset = 0;
 
 	// Buffer for packet data
 	uint8_t buf[0x10000];
@@ -226,16 +384,26 @@ struct capture* convert_capture(const char *filename)
 	struct context context = {
 		.packets = {"packets", &cap->num_packets, sizeof(pkt)},
 		.transactions = {"transactions", &cap->num_transactions, sizeof(tran)},
+		.transfers = {"transfers", &cap->num_transfers, sizeof(xfer)},
+		.mappings = {"mapping", &cap->num_mappings, sizeof(uint64_t)},
 		.data = {"data", &pkt.data_offset, 1},
 		.transaction_state = {
 			.first = 0,
 			.last = 0,
-		}
+		},
+		.transfer_state = {
+			.last = 0,
+		},
 	};
 
 	// Used to iterate over all virtual files
-	struct virtual_file *files[] = {&context.packets, &context.transactions, &context.data};
-	int num_files = 3;
+	struct virtual_file *files[] = {
+		&context.packets,
+		&context.transactions,
+		&context.transfers,
+		&context.mappings,
+		&context.data};
+	int num_files = 5;
 
 	// Open all virtual files.
 	for (int i = 0; i < num_files; i++) {
@@ -283,7 +451,7 @@ struct capture* convert_capture(const char *filename)
 			pkt.data_offset += pkt.length - 3;
 
 		// Update transaction state.
-		transaction_update(&context, cap, &tran, &pkt);
+		transaction_update(&context, cap, &xfer, &tran, &pkt);
 
 		// Increment packet count.
 		cap->num_packets++;
@@ -303,6 +471,8 @@ struct capture* convert_capture(const char *filename)
 	// Assign mappings to capture.
 	cap->packets = context.packets.map;
 	cap->transactions = context.transactions.map;
+	cap->transfers = context.transfers.map;
+	cap->mappings = context.mappings.map;
 	cap->data = context.data.map;
 
 	return cap;
