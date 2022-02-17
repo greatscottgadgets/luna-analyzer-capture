@@ -100,15 +100,29 @@ enum transfer_status {
 
 // Get transfer status based on next transaction for its endpoint.
 static inline enum transfer_status
-transfer_status(enum pid last, enum pid next)
+transfer_status(bool control, enum pid last, enum pid next)
 {
-	// A SETUP transaction starts a new transfer.
-	if (next == SETUP)
+	// A SETUP transaction on a control endpoint always starts
+	// a new control transfer.
+	if (control && next == SETUP)
 		return TRANSFER_NEW;
 
 	// Otherwise, result depends on last transaction.
 	switch (last)
 	{
+	case NONE:
+		// An IN or OUT transaction on a non-control endpoint with
+		// no transfer in progress, starts a new bulk transfer.
+		switch (next)
+		{
+		case IN:
+		case OUT:
+			if (!control)
+				return TRANSFER_NEW;
+		default:
+			break;
+		}
+		break;
 	case SETUP:
 		// SETUP stage must be followed by IN or OUT at data
 		// stage, which will be followed by the status stage.
@@ -125,12 +139,14 @@ transfer_status(enum pid last, enum pid next)
 		switch (next)
 		{
 		case IN:
-			// IN at data stage may be repeated.
+			// In control transfers, IN at data stage may be repeated.
+			// In bulk transfers, IN may be repeated.
 			return TRANSFER_CONT;
 		case OUT:
-			// IN at data stage may be followed by OUT
-			// at status stage, completing the transfer.
-			return TRANSFER_DONE;
+			// In control transfers, IN at data stage may be followed
+			// by OUT at status stage, completing the transfer.
+			if (control)
+				return TRANSFER_DONE;
 		default:
 			break;
 		}
@@ -139,12 +155,14 @@ transfer_status(enum pid last, enum pid next)
 		switch (next)
 		{
 		case OUT:
-			// OUT at data stage may be repeated.
+			// In control transfers, OUT at data stage may be repeated.
+			// In bulk transfers, OUT may be repeated.
 			return TRANSFER_CONT;
 		case IN:
-			// OUT at data stage may be followed by IN
-			// at status stage, completing the transfer.
-			return TRANSFER_DONE;
+			// In control transfers, OUT at data stage may be followed
+			// by IN at status stage, completing the transfer.
+			if (control)
+				return TRANSFER_DONE;
 		default:
 			break;
 		}
@@ -225,8 +243,11 @@ static inline void transfer_update(struct context *context)
 		context->transfer_states[address][endpoint] = state;
 	}
 
+	// Whether this transaction is on the control endpoint.
+	bool control = (endpoint == 0);
+
 	// Check effect of this transaction on the transfer state.
-	enum transfer_status status = transfer_status(state->last, transaction_type);
+	enum transfer_status status = transfer_status(control, state->last, transaction_type);
 
 	// A transaction is successful if it has three packets and completed with ACK.
 	bool success =
@@ -243,7 +264,7 @@ static inline void transfer_update(struct context *context)
 		return;
 	}
 
-	switch (transfer_status(state->last, transaction_type))
+	switch (status)
 	{
 	case TRANSFER_NEW:
 		// New transfer. End any previous one as incomplete.

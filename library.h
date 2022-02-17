@@ -8,6 +8,7 @@ enum pid_type {
 };
 
 enum pid {
+	NONE    = 0x00,
 	RSVD	= 0xF0,
 	OUT	= 0xE1,
 	ACK	= 0xD2,
