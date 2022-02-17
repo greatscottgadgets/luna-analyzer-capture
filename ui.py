@@ -2,7 +2,6 @@ from PySide6.QtWidgets import QApplication, QHeaderView
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import Qt, QCoreApplication, QAbstractTableModel
 
-import faulthandler; faulthandler.enable()
 from interface import *
 import faulthandler
 import sys
@@ -15,18 +14,12 @@ pid_names = [
         "SPLIT", "IN", "NAK", "DATA1",
         "ERR", "SETUP", "STALL", "MDATA"]
 
-class PacketTableModel(QAbstractTableModel):
 
-    cols = ["Packet Index", "Timestamp", "Addr", "EP", "PID", "Length", "Data"]
-
-    INDEX, TIMESTAMP, ADDR, EP, PID, LENGTH, DATA = range(7)
+class TableModel(QAbstractTableModel):
 
     def __init__(self, parent, capture):
         super().__init__(parent)
         self.capture = capture
-
-    def rowCount(self, parent):
-        return self.capture.num_packets
 
     def columnCount(self, parent):
         return len(self.cols)
@@ -35,6 +28,16 @@ class PacketTableModel(QAbstractTableModel):
         if role == Qt.DisplayRole and orientation == Qt.Horizontal:
             return self.cols[section]
         return None
+
+
+class PacketTableModel(TableModel):
+
+    cols = ["Packet Index", "Timestamp", "Addr", "EP", "PID", "Length", "Data"]
+
+    INDEX, TIMESTAMP, ADDR, EP, PID, LENGTH, DATA = range(7)
+
+    def rowCount(self, parent):
+        return self.capture.num_packets
 
     def data(self, index, role):
         if not index.isValid() or role != Qt.DisplayRole:
@@ -77,26 +80,14 @@ class PacketTableModel(QAbstractTableModel):
             return str.join(" ", ("%02X" % byte for byte in packet_data))
 
 
-class TransactionTableModel(QAbstractTableModel):
+class TransactionTableModel(TableModel):
 
     cols = ["Transaction Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Packets", "Result", "Data Bytes", "Data"]
 
     INDEX, TIMESTAMP, DURATION, TYPE, ADDR, EP, PACKETS, RESULT, DATA_BYTES, DATA = range(10)
 
-    def __init__(self, parent, capture):
-        super().__init__(parent)
-        self.capture = capture
-
     def rowCount(self, parent):
         return self.capture.num_transactions
-
-    def columnCount(self, parent):
-        return len(self.cols)
-
-    def headerData(self,section, orientation, role):
-        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
-            return self.cols[section]
-        return None
 
     def data(self, index, role):
         if not index.isValid() or role != Qt.DisplayRole:
@@ -153,26 +144,14 @@ class TransactionTableModel(QAbstractTableModel):
             return str.join(" ", ("%02X" % byte for byte in packet_data))
 
 
-class TransferTableModel(QAbstractTableModel):
+class TransferTableModel(TableModel):
 
     cols = ["Transfer Index", "Timestamp", "Duration", "Addr", "EP", "Transactions", "Transaction Indices"]
 
     INDEX, TIMESTAMP, DURATION, ADDR, EP, TRANSACTIONS, INDICES = range(7)
 
-    def __init__(self, parent, capture):
-        super().__init__(parent)
-        self.capture = capture
-
     def rowCount(self, parent):
         return self.capture.num_transfers
-
-    def columnCount(self, parent):
-        return len(self.cols)
-
-    def headerData(self,section, orientation, role):
-        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
-            return self.cols[section]
-        return None
 
     def data(self, index, role):
         if not index.isValid() or role != Qt.DisplayRole:
