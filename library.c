@@ -57,6 +57,13 @@ static inline void file_open(struct virtual_file *file)
 	file->file = fdopen(file->fd, "r+");
 }
 
+// Write items to virtual file.
+static inline void file_write(struct virtual_file *file, void *src, uint64_t num_items)
+{
+	fwrite(src, num_items, file->item_size, file->file);
+	*file->count_ptr += num_items;
+}
+
 // Map completed virtual file into address space.
 static inline void * file_map(struct virtual_file *file)
 {
@@ -181,11 +188,9 @@ static inline void transfer_append(struct context *context)
 	uint8_t address = context->transaction_state.address;
 	uint8_t endpoint = context->transaction_state.endpoint;
 	struct transfer_state *state = context->transfer_states[address][endpoint];
-	struct transfer *xfer = &state->transfer;
 
 	uint64_t tran_idx = context->capture->num_transactions;
-	fwrite(&tran_idx, 1, sizeof(uint64_t), state->transaction_ids.file);
-	xfer->num_transactions++;
+	file_write(&state->transaction_ids, &tran_idx, 1);
 }
 
 // End a transfer if it was ongoing.
@@ -201,13 +206,11 @@ static inline void transfer_end(struct context *context, uint8_t address, uint8_
 		// A transfer was in progress, write it out.
 		xfer->complete = complete;
 		xfer->id_offset = context->capture->num_transaction_ids;
-		fwrite(xfer, 1, sizeof(struct transfer), context->transfers.file);
-		context->capture->num_transfers++;
+		file_write(&context->transfers, xfer, 1);
 		// Write out transaction IDs for this transfer to main file.
 		struct virtual_file *endpoint_ids = &state->transaction_ids;
 		uint64_t *ids = file_map(endpoint_ids);
-		fwrite(ids, xfer->num_transactions, sizeof(uint64_t), context->transaction_ids.file);
-		context->capture->num_transaction_ids += xfer->num_transactions;
+		file_write(&context->transaction_ids, ids, xfer->num_transactions);
 		// Reset endpoint file so it can be reused.
 		file_reset(endpoint_ids);
 	}
@@ -404,14 +407,14 @@ static inline void transaction_end(struct context *context, bool complete)
 {
 	struct transaction *tran = &context->current_transaction;
 	if (tran->num_packets > 0) {
-		// A transaction was in progress, write it out.
+		// A transaction was in progress.
 		tran->complete = complete;
-		fwrite(tran, 1, sizeof(struct transaction), context->transactions.file);
-		// Update transaction state.
+		// Update transaction state for use by transfer update.
 		context->transaction_state.last = context->current_packet.pid;
 		// Update transfer state.
 		transfer_update(context);
-		context->capture->num_transactions++;
+		// Write out transaction.
+		file_write(&context->transactions, tran, 1);
 	}
 }
 
@@ -518,25 +521,19 @@ struct capture* convert_capture(const char *filename)
 			pkt->pid = buf[0];
 			// Store CRC in packet
 			memcpy(&pkt->fields.data.crc, &buf[pkt->length - 2], 2);
-			// Store data bytes in separate file
-			fwrite(&buf[1], 1, pkt->length - 3, context.data.file);
+			// Store data bytes in separate file, noting offset in packet.
+			pkt->data_offset = cap->data_size;
+			file_write(&context.data, &buf[1], pkt->length - 3);
 		} else {
 			// Store all fields in packet
 			memcpy(&pkt->pid, buf, pkt->length);
 		}
 
-		// Write out packet
-		fwrite(pkt, 1, sizeof(struct packet), context.packets.file);
-
-		// If packet contained data, update offset and data size.
-		if (pkt_is_data)
-			cap->data_size = pkt->data_offset += pkt->length - 3;
-
 		// Update transaction state.
 		transaction_update(&context);
 
-		// Increment packet count.
-		cap->num_packets++;
+		// Write out packet.
+		file_write(&context.packets, pkt, 1);
 	}
 
 	// End any ongoing transaction.
