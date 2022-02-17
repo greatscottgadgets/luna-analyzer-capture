@@ -3,7 +3,10 @@ from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import Qt, QCoreApplication, QAbstractTableModel
 
 from interface import *
+import faulthandler
 import sys
+
+faulthandler.enable()
 
 pid_names = [
         "RSVD", "OUT", "ACK", "DATA0",
