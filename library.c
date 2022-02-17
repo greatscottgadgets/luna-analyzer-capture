@@ -37,7 +37,7 @@ struct transaction_state {
 // Context structure for shared variables needed during decoding.
 struct context {
 	struct capture *capture;
-	struct virtual_file packets, transactions, transfers, mappings, data;
+	struct virtual_file packets, transactions, transfers, transaction_ids, data;
 	struct transfer_state transfer_state;
 	struct transaction_state transaction_state;
 	struct transfer current_transfer;
@@ -147,9 +147,9 @@ transfer_status(enum pid last, enum pid next)
 static inline void transfer_append(struct context *context)
 {
 	uint64_t tran_idx = context->capture->num_transactions;
-	fwrite(&tran_idx, 1, sizeof(uint64_t), context->mappings.file);
+	fwrite(&tran_idx, 1, sizeof(uint64_t), context->transaction_ids.file);
 	context->current_transfer.num_transactions++;
-	context->capture->num_mappings++;
+	context->capture->num_transaction_ids++;
 }
 
 // End a transfer if it was ongoing.
@@ -160,7 +160,7 @@ static inline void transfer_end(struct context *context, bool complete)
 		// A transfer was in progress, write it out.
 		xfer->complete = complete;
 		fwrite(xfer, 1, sizeof(struct transfer), context->transfers.file);
-		xfer->mapping_offset += xfer->num_transactions;
+		xfer->id_offset += xfer->num_transactions;
 		context->capture->num_transfers++;
 	}
 }
@@ -397,7 +397,7 @@ struct capture* convert_capture(const char *filename)
 		.packets = {"packets", &cap->num_packets, sizeof(struct packet)},
 		.transactions = {"transactions", &cap->num_transactions, sizeof(struct transaction)},
 		.transfers = {"transfers", &cap->num_transfers, sizeof(struct transfer)},
-		.mappings = {"mapping", &cap->num_mappings, sizeof(uint64_t)},
+		.transaction_ids = {"transaction_ids", &cap->num_transaction_ids, sizeof(uint64_t)},
 		.data = {"data", &cap->data_size, 1},
 		.transaction_state = {
 			.first = 0,
@@ -407,7 +407,7 @@ struct capture* convert_capture(const char *filename)
 			.last = 0,
 		},
 		.current_transfer = {
-			.mapping_offset = 0,
+			.id_offset = 0,
 		},
 	};
 
@@ -415,7 +415,7 @@ struct capture* convert_capture(const char *filename)
 	file_open(&context.packets);
 	file_open(&context.transactions);
 	file_open(&context.transfers);
-	file_open(&context.mappings);
+	file_open(&context.transaction_ids);
 	file_open(&context.data);
 
 	// Open input file
@@ -470,11 +470,11 @@ struct capture* convert_capture(const char *filename)
 		cap->num_packets++;
 	}
 
-	// Assign mappings to capture.
+	// Assign transaction_ids to capture.
 	cap->packets = file_map(&context.packets);
 	cap->transactions = file_map(&context.transactions);
 	cap->transfers = file_map(&context.transfers);
-	cap->mappings = file_map(&context.mappings);
+	cap->transaction_ids = file_map(&context.transaction_ids);
 	cap->data = file_map(&context.data);
 
 	return cap;

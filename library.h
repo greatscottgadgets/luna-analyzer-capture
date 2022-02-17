@@ -55,19 +55,19 @@ struct transaction {
 };
 
 struct transfer {
-	uint64_t mapping_offset;
+	uint64_t id_offset;
 	uint64_t num_transactions;
 	bool complete;
 };
 
 struct capture {
 	uint64_t num_transfers;
-	uint64_t num_mappings;
+	uint64_t num_transaction_ids;
 	uint64_t num_transactions;
 	uint64_t num_packets;
 	uint64_t data_size;
 	struct transfer *transfers;
-	uint64_t *mappings;
+	uint64_t *transaction_ids;
 	struct transaction *transactions;
 	struct packet *packets;
 	uint8_t *data;

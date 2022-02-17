@@ -164,10 +164,10 @@ class TransferTableModel(TableModel):
             return row
 
         transfer = self.capture.transfers[row]
-        first_mapping = transfer.mapping_offset
-        last_mapping = first_mapping + transfer.num_transactions - 1
-        first_transaction = self.capture.transactions[self.capture.mappings[first_mapping]]
-        last_transaction = self.capture.transactions[self.capture.mappings[last_mapping]]
+        first_id = transfer.id_offset
+        last_id = first_id + transfer.num_transactions - 1
+        first_transaction = self.capture.transactions[self.capture.transaction_ids[first_id]]
+        last_transaction = self.capture.transactions[self.capture.transaction_ids[last_id]]
         first_packet_index = first_transaction.first_packet_index
         last_packet_index = last_transaction.first_packet_index + last_transaction.num_packets - 1
         first_packet = self.capture.packets[first_packet_index]
@@ -190,9 +190,9 @@ class TransferTableModel(TableModel):
             return transfer.num_transactions
 
         if col == self.INDICES:
-            start = first_mapping
-            end = min(last_mapping, start + 100)
-            return str.join(", ", (str(self.capture.mappings[i]) for i in range(start, end)))
+            start = first_id
+            end = min(last_id, start + 100)
+            return str.join(", ", (str(self.capture.transaction_ids[i]) for i in range(start, end)))
 
 
 capture = convert_capture(sys.argv[1].encode('ascii'))
