@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QApplication, QHeaderView
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import Qt, QCoreApplication, QAbstractTableModel
 
+import faulthandler; faulthandler.enable()
 from interface import *
 import faulthandler
 import sys
@@ -151,13 +152,71 @@ class TransactionTableModel(QAbstractTableModel):
             packet_data = self.capture.data[start:end]
             return str.join(" ", ("%02X" % byte for byte in packet_data))
 
+
+class TransferTableModel(QAbstractTableModel):
+
+    cols = ["Transfer Index", "Timestamp", "Duration", "Addr", "EP", "Transactions"]
+
+    INDEX, TIMESTAMP, DURATION, ADDR, EP, TRANSACTIONS= range(6)
+
+    def __init__(self, parent, capture):
+        super().__init__(parent)
+        self.capture = capture
+
+    def rowCount(self, parent):
+        return self.capture.num_transfers
+
+    def columnCount(self, parent):
+        return len(self.cols)
+
+    def headerData(self,section, orientation, role):
+        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
+            return self.cols[section]
+        return None
+
+    def data(self, index, role):
+        if not index.isValid() or role != Qt.DisplayRole:
+            return None
+
+        row = index.row()
+        col = index.column()
+
+        if col == self.INDEX:
+            return row
+
+        transfer = self.capture.transfers[row]
+        start = transfer.mapping_offset
+        end = start + transfer.num_transactions - 1
+        first_transaction = self.capture.transactions[self.capture.mappings[start]]
+        last_transaction = self.capture.transactions[self.capture.mappings[end]]
+        first_packet = self.capture.packets[first_transaction.first_packet_index]
+        last_packet = self.capture.packets[last_transaction.first_packet_index + last_transaction.num_packets - 1]
+
+        if col == self.TIMESTAMP:
+            offset_ns = first_packet.timestamp_ns - self.capture.packets[0].timestamp_ns
+            return "%.9f" % (offset_ns / 1e9)
+
+        if col == self.DURATION:
+            return last_packet.timestamp_ns - first_packet.timestamp_ns
+
+        if col == self.ADDR:
+            return first_packet.fields.token.address
+
+        if col == self.EP:
+            return first_packet.fields.token.endpoint
+
+        if col == self.TRANSACTIONS:
+            return transfer.num_transactions
+
+
 capture = convert_capture(sys.argv[1].encode('ascii'))
 QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 app = QApplication.instance() or QApplication([])
 ui = QUiLoader().load('analyzer.ui')
 for modelClass, view in (
         (PacketTableModel, ui.packetView),
-        (TransactionTableModel, ui.transactionView)):
+        (TransactionTableModel, ui.transactionView),
+        (TransferTableModel, ui.transferView)):
     model = modelClass(app, capture)
     view.setModel(model)
     header = view.horizontalHeader()
