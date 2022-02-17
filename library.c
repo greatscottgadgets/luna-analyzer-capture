@@ -189,13 +189,14 @@ static inline void transfer_append(struct context *context)
 }
 
 // End a transfer if it was ongoing.
-static inline void transfer_end(struct context *context, bool complete)
+static inline void transfer_end(struct context *context, uint8_t address, uint8_t endpoint, bool complete)
 {
-	uint8_t address = context->transaction_state.address;
-	uint8_t endpoint = context->transaction_state.endpoint;
 	struct transfer_state *state = context->transfer_states[address][endpoint];
-	struct transfer *xfer = &state->transfer;
 
+	if (!state)
+		return;
+
+	struct transfer *xfer = &state->transfer;
 	if (xfer->num_transactions > 0) {
 		// A transfer was in progress, write it out.
 		xfer->complete = complete;
@@ -268,7 +269,7 @@ static inline void transfer_update(struct context *context)
 	{
 	case TRANSFER_NEW:
 		// New transfer. End any previous one as incomplete.
-		transfer_end(context, false);
+		transfer_end(context, address, endpoint, false);
 		// Transaction is first of the new transfer.
 		xfer->num_transactions = 0;
 		transfer_append(context);
@@ -282,14 +283,14 @@ static inline void transfer_update(struct context *context)
 	case TRANSFER_DONE:
 		// Transaction completes current transfer.
 		transfer_append(context);
-		transfer_end(context, true);
+		transfer_end(context, address, endpoint, true);
 		// No transfer is now in progress.
 		xfer->num_transactions = 0;
 		state->last = 0;
 		break;
 	case TRANSFER_INVALID:
 		// Transaction not valid as part of any current transfer.
-		transfer_end(context, false);
+		transfer_end(context, address, endpoint, false);
 		// No transfer is now in progress.
 		xfer->num_transactions = 0;
 		state->last = 0;
@@ -537,6 +538,14 @@ struct capture* convert_capture(const char *filename)
 		// Increment packet count.
 		cap->num_packets++;
 	}
+
+	// End any ongoing transaction.
+	transaction_end(&context, false);
+
+	// End any ongoing transfers.
+	for (int address = 0; address < MAX_DEVICES; address++)
+		for (int endpoint = 0; endpoint < MAX_ENDPOINTS; endpoint++)
+			transfer_end(&context, address, endpoint, false);
 
 	// Assign transaction_ids to capture.
 	cap->packets = file_map(&context.packets);
