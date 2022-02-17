@@ -132,7 +132,7 @@ class TransactionTableModel(QAbstractTableModel):
             return first_packet.fields.token.endpoint
 
         if col == self.PACKETS:
-            return transaction.num_packets
+            return str.join(", ", (str(i) for i in range(start, end)))
 
         if col == self.RESULT:
             if not transaction.complete:
@@ -155,9 +155,9 @@ class TransactionTableModel(QAbstractTableModel):
 
 class TransferTableModel(QAbstractTableModel):
 
-    cols = ["Transfer Index", "Timestamp", "Duration", "Addr", "EP", "Transactions"]
+    cols = ["Transfer Index", "Timestamp", "Duration", "Addr", "EP", "Transactions", "Transaction Indices"]
 
-    INDEX, TIMESTAMP, DURATION, ADDR, EP, TRANSACTIONS= range(6)
+    INDEX, TIMESTAMP, DURATION, ADDR, EP, TRANSACTIONS, INDICES = range(7)
 
     def __init__(self, parent, capture):
         super().__init__(parent)
@@ -186,9 +186,9 @@ class TransferTableModel(QAbstractTableModel):
 
         transfer = self.capture.transfers[row]
         start = transfer.mapping_offset
-        end = start + transfer.num_transactions - 1
+        end = start + transfer.num_transactions
         first_transaction = self.capture.transactions[self.capture.mappings[start]]
-        last_transaction = self.capture.transactions[self.capture.mappings[end]]
+        last_transaction = self.capture.transactions[self.capture.mappings[end - 1]]
         first_packet = self.capture.packets[first_transaction.first_packet_index]
         last_packet = self.capture.packets[last_transaction.first_packet_index + last_transaction.num_packets - 1]
 
@@ -207,6 +207,9 @@ class TransferTableModel(QAbstractTableModel):
 
         if col == self.TRANSACTIONS:
             return transfer.num_transactions
+
+        if col == self.INDICES:
+            return str.join(", ", (str(self.capture.mappings[i]) for i in range(start, end)))
 
 
 capture = convert_capture(sys.argv[1].encode('ascii'))
