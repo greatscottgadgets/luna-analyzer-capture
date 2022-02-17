@@ -83,16 +83,32 @@ transfer_status(enum pid last, enum pid next)
 		}
 		break;
 	case IN:
-		// IN at data stage must be followed by OUT at
-		// status stage, completing the transfer.
-		if (next == OUT)
+		switch (next)
+		{
+		case IN:
+			// IN at data stage may be repeated.
+			return TRANSFER_CONT;
+		case OUT:
+			// IN at data stage may be followed by OUT
+			// at status stage, completing the transfer.
 			return TRANSFER_DONE;
+		default:
+			break;
+		}
 		break;
 	case OUT:
-		// OUT at data stage must be followed by IN at
-		// status stage, completing the transfer.
-		if (next == IN)
+		switch (next)
+		{
+		case OUT:
+			// OUT at data stage may be repeated.
+			return TRANSFER_CONT;
+		case IN:
+			// OUT at data stage may be followed by IN
+			// at status stage, completing the transfer.
 			return TRANSFER_DONE;
+		default:
+			break;
+		}
 		break;
 	default:
 		break;
