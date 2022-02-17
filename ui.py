@@ -209,6 +209,7 @@ class TransferTableModel(QAbstractTableModel):
             return transfer.num_transactions
 
         if col == self.INDICES:
+            end = min(end, start + 100)
             return str.join(", ", (str(self.capture.mappings[i]) for i in range(start, end)))
 
 
