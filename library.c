@@ -45,6 +45,25 @@ struct context {
 	struct packet current_packet;
 };
 
+// Open a virtual file for open-ended capture data.
+static inline void file_open(struct virtual_file *file)
+{
+	file->fd = memfd_create(file->name, 0);
+	file->file = fdopen(file->fd, "r+");
+}
+
+// Map completed virtual file into address space.
+static inline void * file_map(struct virtual_file *file)
+{
+	// Flush buffered writes.
+	fflush(file->file);
+	// Calculate mapping size.
+	size_t num_bytes = *file->count_ptr * file->item_size;
+	// Create mapping.
+	file->map = mmap(NULL, num_bytes, PROT_READ, MAP_SHARED, file->fd, 0);
+	return file->map;
+}
+
 // Time as nanoseconds since Unix epoch (good for next 500 years).
 static inline uint64_t nanotime(void)
 {
@@ -398,20 +417,12 @@ struct capture* convert_capture(const char *filename)
 		},
 	};
 
-	// Used to iterate over all virtual files
-	struct virtual_file *files[] = {
-		&context.packets,
-		&context.transactions,
-		&context.transfers,
-		&context.mappings,
-		&context.data};
-	int num_files = 5;
-
-	// Open all virtual files.
-	for (int i = 0; i < num_files; i++) {
-		files[i]->fd = memfd_create(files[i]->name, 0);
-		files[i]->file = fdopen(files[i]->fd, "r+");
-	}
+	// Open virtual files for capture data.
+	file_open(&context.packets);
+	file_open(&context.transactions);
+	file_open(&context.transfers);
+	file_open(&context.mappings);
+	file_open(&context.data);
 
 	while (1)
 	{
@@ -461,23 +472,12 @@ struct capture* convert_capture(const char *filename)
 		cap->num_packets++;
 	}
 
-	// Map completed virtual files into address space.
-	for (int i = 0; i < num_files; i++)
-	{
-		// Flush buffered writes.
-		fflush(files[i]->file);
-		// Calculate mapping size.
-		size_t num_bytes = *files[i]->count_ptr * files[i]->item_size;
-		// Create mapping.
-		files[i]->map = mmap(NULL, num_bytes, PROT_READ, MAP_SHARED, files[i]->fd, 0);
-	}
-
 	// Assign mappings to capture.
-	cap->packets = context.packets.map;
-	cap->transactions = context.transactions.map;
-	cap->transfers = context.transfers.map;
-	cap->mappings = context.mappings.map;
-	cap->data = context.data.map;
+	cap->packets = file_map(&context.packets);
+	cap->transactions = file_map(&context.transactions);
+	cap->transfers = file_map(&context.transfers);
+	cap->mappings = file_map(&context.mappings);
+	cap->data = file_map(&context.data);
 
 	return cap;
 }
