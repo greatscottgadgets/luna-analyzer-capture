@@ -65,6 +65,7 @@ struct capture {
 	uint64_t num_mappings;
 	uint64_t num_transactions;
 	uint64_t num_packets;
+	uint64_t data_size;
 	struct transfer *transfers;
 	uint64_t *mappings;
 	struct transaction *transactions;

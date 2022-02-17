@@ -42,6 +42,7 @@ struct context {
 	struct transaction_state transaction_state;
 	struct transfer current_transfer;
 	struct transaction current_transaction;
+	struct packet current_packet;
 };
 
 // Time as nanoseconds since Unix epoch (good for next 500 years).
@@ -305,10 +306,7 @@ transaction_status(enum pid first, enum pid last, enum pid next)
 }
 
 // End a transaction if it was ongoing.
-static inline void transaction_end(
-	struct context *context,
-	struct packet *pkt,
-	bool complete)
+static inline void transaction_end(struct context *context, bool complete)
 {
 	struct transaction *tran = &context->current_transaction;
 	if (tran->num_packets > 0) {
@@ -316,7 +314,7 @@ static inline void transaction_end(
 		tran->complete = complete;
 		fwrite(tran, 1, sizeof(struct transaction), context->transactions.file);
 		// Update transaction state.
-		context->transaction_state.last = pkt->pid;
+		context->transaction_state.last = context->current_packet.pid;
 		// Update transfer state.
 		transfer_update(context);
 		context->capture->num_transactions++;
@@ -324,18 +322,17 @@ static inline void transaction_end(
 }
 
 // Update transaction state based on new packet.
-static inline void transaction_update(
-	struct context *context,
-	struct packet *pkt)
+static inline void transaction_update(struct context *context)
 {
 	struct transaction *tran = &context->current_transaction;
+	struct packet *pkt = &context->current_packet;
 	struct transaction_state *state = &context->transaction_state;
 
 	switch (transaction_status(state->first, state->last, pkt->pid))
 	{
 	case TRANSACTION_NEW:
 		// New transaction. End any previous one as incomplete.
-		transaction_end(context, pkt, false);
+		transaction_end(context, false);
 		// Packet is first of the new transaction.
 		tran->first_packet_index = context->capture->num_packets;
 		tran->num_packets = 1;
@@ -352,7 +349,7 @@ static inline void transaction_update(
 	case TRANSACTION_DONE:
 		// Packet completes current transaction.
 		tran->num_packets++;
-		transaction_end(context, pkt, true);
+		transaction_end(context, true);
 		// No transaction is now in progress.
 		tran->num_packets = 0;
 		state->first = 0;
@@ -360,7 +357,7 @@ static inline void transaction_update(
 		break;
 	case TRANSACTION_INVALID:
 		// Packet not valid as part of any current transaction.
-		transaction_end(context, pkt, false);
+		transaction_end(context, false);
 		// No transaction is now in progress.
 		tran->num_packets = 0;
 		state->first = 0;
@@ -375,12 +372,6 @@ struct capture* convert_capture(const char *filename)
 	struct capture *cap = malloc(sizeof(struct capture));
 	memset(cap, 0, sizeof(struct capture));
 
-	// Metadata structs reused for each packet & transaction.
-	struct packet pkt;
-
-	// Offsets start at zero
-	pkt.data_offset = 0;
-
 	// Buffer for packet data
 	uint8_t buf[0x10000];
 
@@ -390,11 +381,11 @@ struct capture* convert_capture(const char *filename)
 	// Set up context structure.
 	struct context context = {
 		.capture = cap,
-		.packets = {"packets", &cap->num_packets, sizeof(pkt)},
+		.packets = {"packets", &cap->num_packets, sizeof(struct packet)},
 		.transactions = {"transactions", &cap->num_transactions, sizeof(struct transaction)},
 		.transfers = {"transfers", &cap->num_transfers, sizeof(struct transfer)},
 		.mappings = {"mapping", &cap->num_mappings, sizeof(uint64_t)},
-		.data = {"data", &pkt.data_offset, 1},
+		.data = {"data", &cap->data_size, 1},
 		.transaction_state = {
 			.first = 0,
 			.last = 0,
@@ -424,19 +415,21 @@ struct capture* convert_capture(const char *filename)
 
 	while (1)
 	{
+		struct packet *pkt = &context.current_packet;
+
 		// Read packet length.
 		uint16_t len;
 		if (fread(&len, 1, sizeof(len), input_file) < sizeof(len))
 			break;
 
 		// Generate timestamp.
-		pkt.timestamp_ns = nanotime();
+		pkt->timestamp_ns = nanotime();
 
 		// Convert packet length to host format.
-		pkt.length = ntohs(len);
+		pkt->length = ntohs(len);
 
 		// Read remaining packet bytes.
-		if (fread(buf, 1, pkt.length, input_file) < pkt.length)
+		if (fread(buf, 1, pkt->length, input_file) < pkt->length)
 			break;
 
 		// Is this a data packet?
@@ -444,25 +437,25 @@ struct capture* convert_capture(const char *filename)
 
 		if (pkt_is_data) {
 			// Store PID in packet
-			pkt.pid = buf[0];
+			pkt->pid = buf[0];
 			// Store CRC in packet
-			memcpy(&pkt.fields.data.crc, &buf[pkt.length - 2], 2);
+			memcpy(&pkt->fields.data.crc, &buf[pkt->length - 2], 2);
 			// Store data bytes in separate file
-			fwrite(&buf[1], 1, pkt.length - 3, context.data.file);
+			fwrite(&buf[1], 1, pkt->length - 3, context.data.file);
 		} else {
 			// Store all fields in packet
-			memcpy(&pkt.pid, buf, pkt.length);
+			memcpy(&pkt->pid, buf, pkt->length);
 		}
 
 		// Write out packet
-		fwrite(&pkt, 1, sizeof(pkt), context.packets.file);
+		fwrite(pkt, 1, sizeof(struct packet), context.packets.file);
 
-		// If packet contained data, update offset.
+		// If packet contained data, update offset and data size.
 		if (pkt_is_data)
-			pkt.data_offset += pkt.length - 3;
+			cap->data_size = pkt->data_offset += pkt->length - 3;
 
 		// Update transaction state.
-		transaction_update(&context, &pkt);
+		transaction_update(&context);
 
 		// Increment packet count.
 		cap->num_packets++;
