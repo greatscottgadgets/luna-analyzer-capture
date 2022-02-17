@@ -191,7 +191,7 @@ class TransferTableModel(TableModel):
 
         if col == self.INDICES:
             start = first_id
-            end = min(last_id, start + 100)
+            end = min(last_id + 1, start + 100)
             return str.join(", ", (str(self.capture.transaction_ids[i]) for i in range(start, end)))
 
 
