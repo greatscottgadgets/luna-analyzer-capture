@@ -11,6 +11,28 @@
 
 #include "library.h"
 
+// A virtual file used for capture data.
+struct virtual_file {
+	const char *name;
+	uint64_t *count_ptr;
+	size_t item_size;
+	int fd;
+	FILE *file;
+	void *map;
+};
+
+// Transaction decoder state.
+struct transaction_state {
+	enum pid first;
+	enum pid last;
+};
+
+// Context structure for shared variables needed during decoding.
+struct context {
+	struct virtual_file packets, transactions, data;
+	struct transaction_state transaction_state;
+};
+
 // Time as nanoseconds since Unix epoch (good for next 500 years).
 static inline uint64_t nanotime(void)
 {
@@ -122,38 +144,33 @@ transaction_status(enum pid first, enum pid last, enum pid next)
 
 // End a transaction if it was ongoing.
 static inline void transaction_end(
+	struct context *context,
 	struct capture *cap,
 	struct transaction *tran,
-	FILE *file,
 	bool complete)
 {
 	if (tran->num_packets > 0) {
 		// A transaction was in progress, write it out.
 		tran->complete = complete;
-		fwrite(tran, 1, sizeof(struct transaction), file);
+		fwrite(tran, 1, sizeof(struct transaction), context->transactions.file);
 		cap->num_transactions++;
 	}
 }
 
-// Transaction decoder state.
-struct transaction_state {
-	enum pid first;
-	enum pid last;
-};
-
 // Update transaction state based on new packet.
 static inline void transaction_update(
+	struct context *context,
 	struct capture *cap,
 	struct transaction *tran,
-	struct packet *pkt,
-	struct transaction_state *state,
-	FILE* file)
+	struct packet *pkt)
 {
+	struct transaction_state *state = &context->transaction_state;
+
 	switch (transaction_status(state->first, state->last, pkt->pid))
 	{
 	case TRANSACTION_NEW:
 		// New transaction. End any previous one as incomplete.
-		transaction_end(cap, tran, file, false);
+		transaction_end(context, cap, tran, false);
 		// Packet is first of the new transaction.
 		tran->first_packet_index = cap->num_packets;
 		tran->num_packets = 1;
@@ -168,7 +185,7 @@ static inline void transaction_update(
 	case TRANSACTION_DONE:
 		// Packet completes current transaction.
 		tran->num_packets++;
-		transaction_end(cap, tran, file, true);
+		transaction_end(context, cap, tran, true);
 		// No transaction is now in progress.
 		tran->num_packets = 0;
 		state->first = 0;
@@ -176,7 +193,7 @@ static inline void transaction_update(
 		break;
 	case TRANSACTION_INVALID:
 		// Packet not valid as part of any current transaction.
-		transaction_end(cap, tran, file, false);
+		transaction_end(context, cap, tran, false);
 		// No transaction is now in progress.
 		tran->num_packets = 0;
 		state->first = 0;
@@ -184,16 +201,6 @@ static inline void transaction_update(
 		break;
 	}
 }
-
-// A virtual file used for capture data.
-struct virtual_file {
-	const char *name;
-	uint64_t *count_ptr;
-	size_t item_size;
-	int fd;
-	FILE *file;
-	void *map;
-};
 
 struct capture* convert_capture(const char *filename)
 {
@@ -215,11 +222,19 @@ struct capture* convert_capture(const char *filename)
 	// Open input file
 	FILE* input_file = fopen(filename, "r");
 
-	// Virtual files used for capture data
-	struct virtual_file packets = {"packets", &cap->num_packets, sizeof(pkt)};
-	struct virtual_file transactions = {"transactions", &cap->num_transactions, sizeof(tran)};
-	struct virtual_file data = {"data", &pkt.data_offset, 1};
-	struct virtual_file *files[] = {&packets, &transactions, &data};
+	// Set up context structure.
+	struct context context = {
+		.packets = {"packets", &cap->num_packets, sizeof(pkt)},
+		.transactions = {"transactions", &cap->num_transactions, sizeof(tran)},
+		.data = {"data", &pkt.data_offset, 1},
+		.transaction_state = {
+			.first = 0,
+			.last = 0,
+		}
+	};
+
+	// Used to iterate over all virtual files
+	struct virtual_file *files[] = {&context.packets, &context.transactions, &context.data};
 	int num_files = 3;
 
 	// Open all virtual files.
@@ -227,12 +242,6 @@ struct capture* convert_capture(const char *filename)
 		files[i]->fd = memfd_create(files[i]->name, 0);
 		files[i]->file = fdopen(files[i]->fd, "r+");
 	}
-
-	// Used to track transaction state.
-	struct transaction_state state = {
-		.first = 0,
-		.last = 0,
-	};
 
 	while (1)
 	{
@@ -260,21 +269,21 @@ struct capture* convert_capture(const char *filename)
 			// Store CRC in packet
 			memcpy(&pkt.fields.data.crc, &buf[pkt.length - 2], 2);
 			// Store data bytes in separate file
-			fwrite(&buf[1], 1, pkt.length - 3, data.file);
+			fwrite(&buf[1], 1, pkt.length - 3, context.data.file);
 		} else {
 			// Store all fields in packet
 			memcpy(&pkt.pid, buf, pkt.length);
 		}
 
 		// Write out packet
-		fwrite(&pkt, 1, sizeof(pkt), packets.file);
+		fwrite(&pkt, 1, sizeof(pkt), context.packets.file);
 
 		// If packet contained data, update offset.
 		if (pkt_is_data)
 			pkt.data_offset += pkt.length - 3;
 
 		// Update transaction state.
-		transaction_update(cap, &tran, &pkt, &state, transactions.file);
+		transaction_update(&context, cap, &tran, &pkt);
 
 		// Increment packet count.
 		cap->num_packets++;
@@ -292,9 +301,9 @@ struct capture* convert_capture(const char *filename)
 	}
 
 	// Assign mappings to capture.
-	cap->packets = packets.map;
-	cap->transactions = transactions.map;
-	cap->data = data.map;
+	cap->packets = context.packets.map;
+	cap->transactions = context.transactions.map;
+	cap->data = context.data.map;
 
 	return cap;
 }
