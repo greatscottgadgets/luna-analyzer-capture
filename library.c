@@ -11,18 +11,24 @@
 
 #include "library.h"
 
+#define MAX_DEVICES 128
+#define MAX_ENDPOINTS 16
+
 // A virtual file used for capture data.
 struct virtual_file {
-	const char *name;
+	char *name;
 	uint64_t *count_ptr;
 	size_t item_size;
 	int fd;
 	FILE *file;
 	void *map;
+	size_t map_length;
 };
 
 // Transfer decoder state.
 struct transfer_state {
+	struct transfer transfer;
+	struct virtual_file transaction_ids;
 	enum pid last;
 };
 
@@ -38,9 +44,8 @@ struct transaction_state {
 struct context {
 	struct capture *capture;
 	struct virtual_file packets, transactions, transfers, transaction_ids, data;
-	struct transfer_state transfer_state;
+	struct transfer_state *transfer_states[MAX_DEVICES][MAX_ENDPOINTS];
 	struct transaction_state transaction_state;
-	struct transfer current_transfer;
 	struct transaction current_transaction;
 	struct packet current_packet;
 };
@@ -58,10 +63,19 @@ static inline void * file_map(struct virtual_file *file)
 	// Flush buffered writes.
 	fflush(file->file);
 	// Calculate mapping size.
-	size_t num_bytes = *file->count_ptr * file->item_size;
+	file->map_length = *file->count_ptr * file->item_size;
 	// Create mapping.
-	file->map = mmap(NULL, num_bytes, PROT_READ, MAP_SHARED, file->fd, 0);
+	file->map = mmap(NULL, file->map_length, PROT_READ, MAP_SHARED, file->fd, 0);
 	return file->map;
+}
+
+// Reset virtual file so that it can be reused.
+static inline void file_reset(struct virtual_file *file)
+{
+	// Remove mapping.
+	munmap(file->map, file->map_length);
+	// Seek back to start of file.
+	fseek(file->file, 0, SEEK_SET);
 }
 
 // Time as nanoseconds since Unix epoch (good for next 500 years).
@@ -146,32 +160,70 @@ transfer_status(enum pid last, enum pid next)
 // Append a transaction to the current transfer.
 static inline void transfer_append(struct context *context)
 {
+	uint8_t address = context->transaction_state.address;
+	uint8_t endpoint = context->transaction_state.endpoint;
+	struct transfer_state *state = context->transfer_states[address][endpoint];
+	struct transfer *xfer = &state->transfer;
+
 	uint64_t tran_idx = context->capture->num_transactions;
-	fwrite(&tran_idx, 1, sizeof(uint64_t), context->transaction_ids.file);
-	context->current_transfer.num_transactions++;
-	context->capture->num_transaction_ids++;
+	fwrite(&tran_idx, 1, sizeof(uint64_t), state->transaction_ids.file);
+	xfer->num_transactions++;
 }
 
 // End a transfer if it was ongoing.
 static inline void transfer_end(struct context *context, bool complete)
 {
-	struct transfer *xfer = &context->current_transfer;
+	uint8_t address = context->transaction_state.address;
+	uint8_t endpoint = context->transaction_state.endpoint;
+	struct transfer_state *state = context->transfer_states[address][endpoint];
+	struct transfer *xfer = &state->transfer;
+
 	if (xfer->num_transactions > 0) {
 		// A transfer was in progress, write it out.
 		xfer->complete = complete;
+		xfer->id_offset = context->capture->num_transaction_ids;
 		fwrite(xfer, 1, sizeof(struct transfer), context->transfers.file);
-		xfer->id_offset += xfer->num_transactions;
 		context->capture->num_transfers++;
+		// Write out transaction IDs for this transfer to main file.
+		struct virtual_file *endpoint_ids = &state->transaction_ids;
+		uint64_t *ids = file_map(endpoint_ids);
+		fwrite(ids, xfer->num_transactions, sizeof(uint64_t), context->transaction_ids.file);
+		context->capture->num_transaction_ids += xfer->num_transactions;
+		// Reset endpoint file so it can be reused.
+		file_reset(endpoint_ids);
 	}
 }
 
 // Update transfer state based on new transaction on its endpoint.
 static inline void transfer_update(struct context *context)
 {
-	struct transfer *xfer = &context->current_transfer;
 	struct transaction *tran = &context->current_transaction;
-	struct transfer_state *state = &context->transfer_state;
 	enum pid transaction_type = context->transaction_state.first;
+	uint8_t address = context->transaction_state.address;
+	uint8_t endpoint = context->transaction_state.endpoint;
+	struct transfer_state *state = context->transfer_states[address][endpoint];
+
+	// If we don't have a transfer state for this endpoint yet, create one.
+	if (state == NULL)
+	{
+		// Allocate & populate transfer state.
+		state = malloc(sizeof(struct transfer_state));
+		state->transfer.num_transactions = 0;
+		state->last = 0;
+		// Virtual file for this endpoint's transaction IDs.
+		struct virtual_file *file = &state->transaction_ids;
+		file->count_ptr = &state->transfer.num_transactions;
+		file->item_size = sizeof(uint64_t);
+		// Construct and set filename for the virtual file..
+		const char *name_fmt = "transaction_ids_%u_%u";
+		size_t name_len = snprintf(NULL, 0, name_fmt, address, endpoint) + 1;
+		file->name = malloc(name_len);
+		snprintf(file->name, name_len, name_fmt, address, endpoint);
+		// Open virtual file.
+		file_open(file);
+		// Store new transfer state.
+		context->transfer_states[address][endpoint] = state;
+	}
 
 	// Check effect of this transaction on the transfer state.
 	enum transfer_status status = transfer_status(state->last, transaction_type);
@@ -184,6 +236,7 @@ static inline void transfer_update(struct context *context)
 
 	// If a transfer is in progress, and the transaction would have been valid
 	// but was not successful, append it to the transfer without changing state.
+	struct transfer *xfer = &state->transfer;
 	if (xfer->num_transactions > 0 && status != TRANSFER_INVALID && !success)
 	{
 		transfer_append(context);
@@ -402,12 +455,6 @@ struct capture* convert_capture(const char *filename)
 		.transaction_state = {
 			.first = 0,
 			.last = 0,
-		},
-		.transfer_state = {
-			.last = 0,
-		},
-		.current_transfer = {
-			.id_offset = 0,
 		},
 	};
 
