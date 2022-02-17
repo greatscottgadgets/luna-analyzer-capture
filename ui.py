@@ -146,9 +146,9 @@ class TransactionTableModel(TableModel):
 
 class TransferTableModel(TableModel):
 
-    cols = ["Transfer Index", "Timestamp", "Duration", "Addr", "EP", "Transactions", "Transaction Indices"]
+    cols = ["Transfer Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Transactions", "Transaction Indices"]
 
-    INDEX, TIMESTAMP, DURATION, ADDR, EP, TRANSACTIONS, INDICES = range(7)
+    INDEX, TIMESTAMP, DURATION, TYPE, ADDR, EP, TRANSACTIONS, INDICES = range(8)
 
     def rowCount(self, parent):
         return self.capture.num_transfers
@@ -179,6 +179,14 @@ class TransferTableModel(TableModel):
 
         if col == self.DURATION:
             return last_packet.timestamp_ns - first_packet.timestamp_ns
+
+        if col == self.TYPE:
+            if first_packet.pid == SETUP:
+                return "CONTROL"
+            elif first_packet.pid == IN:
+                return "BULK IN"
+            elif first_packet.pid == OUT:
+                return "BULK OUT"
 
         if col == self.ADDR:
             return first_packet.fields.token.address
