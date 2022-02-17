@@ -61,12 +61,19 @@ struct transfer {
 	bool complete;
 };
 
+struct endpoint {
+	uint8_t address;
+	uint8_t endpoint;
+};
+
 struct capture {
+	uint64_t num_endpoints;
 	uint64_t num_transfers;
 	uint64_t num_transaction_ids;
 	uint64_t num_transactions;
 	uint64_t num_packets;
 	uint64_t data_size;
+	struct endpoint *endpoints;
 	struct transfer *transfers;
 	uint64_t *transaction_ids;
 	struct transaction *transactions;

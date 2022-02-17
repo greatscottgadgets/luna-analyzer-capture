@@ -43,7 +43,7 @@ struct transaction_state {
 // Context structure for shared variables needed during decoding.
 struct context {
 	struct capture *capture;
-	struct virtual_file packets, transactions, transfers, transaction_ids, data;
+	struct virtual_file packets, transactions, endpoints, transfers, transaction_ids, data;
 	struct transfer_state *transfer_states[MAX_DEVICES][MAX_ENDPOINTS];
 	struct transaction_state transaction_state;
 	struct transaction current_transaction;
@@ -245,6 +245,12 @@ static inline void transfer_update(struct context *context)
 		file_open(file);
 		// Store new transfer state.
 		context->transfer_states[address][endpoint] = state;
+		// Write a new endpoint entry.
+		struct endpoint ep = {
+			.address = address,
+			.endpoint = endpoint,
+		};
+		file_write(&context->endpoints, &ep, 1);
 	}
 
 	// Whether this transaction is on the control endpoint.
@@ -474,6 +480,7 @@ struct capture* convert_capture(const char *filename)
 		.capture = cap,
 		.packets = {"packets", &cap->num_packets, sizeof(struct packet)},
 		.transactions = {"transactions", &cap->num_transactions, sizeof(struct transaction)},
+		.endpoints = {"endpoints", &cap->num_endpoints, sizeof(struct endpoint)},
 		.transfers = {"transfers", &cap->num_transfers, sizeof(struct transfer)},
 		.transaction_ids = {"transaction_ids", &cap->num_transaction_ids, sizeof(uint64_t)},
 		.data = {"data", &cap->data_size, 1},
@@ -486,6 +493,7 @@ struct capture* convert_capture(const char *filename)
 	// Open virtual files for capture data.
 	file_open(&context.packets);
 	file_open(&context.transactions);
+	file_open(&context.endpoints);
 	file_open(&context.transfers);
 	file_open(&context.transaction_ids);
 	file_open(&context.data);
@@ -547,6 +555,7 @@ struct capture* convert_capture(const char *filename)
 	// Assign transaction_ids to capture.
 	cap->packets = file_map(&context.packets);
 	cap->transactions = file_map(&context.transactions);
+	cap->endpoints = file_map(&context.endpoints);
 	cap->transfers = file_map(&context.transfers);
 	cap->transaction_ids = file_map(&context.transaction_ids);
 	cap->data = file_map(&context.data);
