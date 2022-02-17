@@ -391,12 +391,6 @@ struct capture* convert_capture(const char *filename)
 	struct capture *cap = malloc(sizeof(struct capture));
 	memset(cap, 0, sizeof(struct capture));
 
-	// Buffer for packet data
-	uint8_t buf[0x10000];
-
-	// Open input file
-	FILE* input_file = fopen(filename, "r");
-
 	// Set up context structure.
 	struct context context = {
 		.capture = cap,
@@ -424,9 +418,13 @@ struct capture* convert_capture(const char *filename)
 	file_open(&context.mappings);
 	file_open(&context.data);
 
+	// Open input file
+	FILE* input_file = fopen(filename, "r");
+
 	while (1)
 	{
 		struct packet *pkt = &context.current_packet;
+		uint8_t buf[0x10000];
 
 		// Read packet length.
 		uint16_t len;
