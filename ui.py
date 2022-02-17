@@ -164,12 +164,14 @@ class TransferTableModel(TableModel):
             return row
 
         transfer = self.capture.transfers[row]
-        start = transfer.mapping_offset
-        end = start + transfer.num_transactions
-        first_transaction = self.capture.transactions[self.capture.mappings[start]]
-        last_transaction = self.capture.transactions[self.capture.mappings[end - 1]]
-        first_packet = self.capture.packets[first_transaction.first_packet_index]
-        last_packet = self.capture.packets[last_transaction.first_packet_index + last_transaction.num_packets - 1]
+        first_mapping = transfer.mapping_offset
+        last_mapping = first_mapping + transfer.num_transactions - 1
+        first_transaction = self.capture.transactions[self.capture.mappings[first_mapping]]
+        last_transaction = self.capture.transactions[self.capture.mappings[last_mapping]]
+        first_packet_index = first_transaction.first_packet_index
+        last_packet_index = last_transaction.first_packet_index + last_transaction.num_packets - 1
+        first_packet = self.capture.packets[first_packet_index]
+        last_packet = self.capture.packets[last_packet_index]
 
         if col == self.TIMESTAMP:
             offset_ns = first_packet.timestamp_ns - self.capture.packets[0].timestamp_ns
@@ -188,7 +190,8 @@ class TransferTableModel(TableModel):
             return transfer.num_transactions
 
         if col == self.INDICES:
-            end = min(end, start + 100)
+            start = first_mapping
+            end = min(last_mapping, start + 100)
             return str.join(", ", (str(self.capture.mappings[i]) for i in range(start, end)))
 
 
