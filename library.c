@@ -30,6 +30,8 @@ struct transfer_state {
 struct transaction_state {
 	enum pid first;
 	enum pid last;
+	uint8_t address;
+	uint8_t endpoint;
 };
 
 // Context structure for shared variables needed during decoding.
@@ -349,6 +351,8 @@ static inline void transaction_update(
 		tran->num_packets = 1;
 		state->first = pkt->pid;
 		state->last = pkt->pid;
+		state->address = pkt->fields.token.address;
+		state->endpoint = pkt->fields.token.endpoint;
 		break;
 	case TRANSACTION_CONT:
 		// Packet is added to the current transaction.
