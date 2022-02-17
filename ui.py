@@ -163,11 +163,17 @@ class TransferTableModel(TableModel):
         if col == self.INDEX:
             return row
 
-        transfer = self.capture.transfers[row]
+        entry = self.capture.transfer_index[row]
+        endpoint_id = entry.endpoint_id
+        transfer_id = entry.transfer_id
+        endpoint = self.capture.endpoints[endpoint_id]
+        endpoint_traffic = self.capture.endpoint_traffic[endpoint_id]
+        transfer = endpoint_traffic.transfers[transfer_id]
+        endpoint_transaction_ids = endpoint_traffic.transaction_ids
         first_id = transfer.id_offset
         last_id = first_id + transfer.num_transactions - 1
-        first_transaction = self.capture.transactions[self.capture.transaction_ids[first_id]]
-        last_transaction = self.capture.transactions[self.capture.transaction_ids[last_id]]
+        first_transaction = self.capture.transactions[endpoint_transaction_ids[first_id]]
+        last_transaction = self.capture.transactions[endpoint_transaction_ids[last_id]]
         first_packet_index = first_transaction.first_packet_index
         last_packet_index = last_transaction.first_packet_index + last_transaction.num_packets - 1
         first_packet = self.capture.packets[first_packet_index]
@@ -189,10 +195,10 @@ class TransferTableModel(TableModel):
                 return "BULK OUT"
 
         if col == self.ADDR:
-            return first_packet.fields.token.address
+            return endpoint.address
 
         if col == self.EP:
-            return first_packet.fields.token.endpoint
+            return endpoint.endpoint
 
         if col == self.TRANSACTIONS:
             return transfer.num_transactions
@@ -200,7 +206,7 @@ class TransferTableModel(TableModel):
         if col == self.INDICES:
             start = first_id
             end = min(last_id + 1, start + 100)
-            return str.join(", ", (str(self.capture.transaction_ids[i]) for i in range(start, end)))
+            return str.join(", ", (str(endpoint_transaction_ids[i]) for i in range(start, end)))
 
 
 capture = convert_capture(sys.argv[1].encode('ascii'))

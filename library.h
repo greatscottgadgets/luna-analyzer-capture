@@ -66,16 +66,27 @@ struct endpoint {
 	uint8_t endpoint;
 };
 
+struct endpoint_traffic {
+	uint64_t num_transfers;
+	uint64_t num_transaction_ids;
+	struct transfer *transfers;
+	uint64_t *transaction_ids;
+};
+
+struct transfer_index_entry {
+	uint16_t endpoint_id;
+	uint64_t transfer_id;
+};
+
 struct capture {
 	uint64_t num_endpoints;
 	uint64_t num_transfers;
-	uint64_t num_transaction_ids;
 	uint64_t num_transactions;
 	uint64_t num_packets;
 	uint64_t data_size;
 	struct endpoint *endpoints;
-	struct transfer *transfers;
-	uint64_t *transaction_ids;
+	struct endpoint_traffic **endpoint_traffic;
+	struct transfer_index_entry *transfer_index;
 	struct transaction *transactions;
 	struct packet *packets;
 	uint8_t *data;
