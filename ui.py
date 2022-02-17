@@ -127,7 +127,7 @@ class TransactionTableModel(TableModel):
 
         if col == self.RESULT:
             if not transaction.complete:
-                return "INCOMPLETE"
+                return "ERR"
             else:
                 return pid_names[last_packet.pid & 0b1111]
 
