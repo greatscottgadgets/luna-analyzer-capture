@@ -31,9 +31,9 @@ enum transaction_status {
 	TRANSACTION_INVALID,
 };
 
-// Update transaction state based on last three packets.
+// Get transaction status based on next packet
 static inline enum transaction_status
-transaction_update(enum pid first, enum pid last, enum pid next)
+transaction_status(enum pid first, enum pid last, enum pid next)
 {
 	// SETUP, IN and OUT always start a new transaction.
 	switch (next)
@@ -120,6 +120,71 @@ transaction_update(enum pid first, enum pid last, enum pid next)
 	return TRANSACTION_INVALID;
 }
 
+// End a transaction if it was ongoing.
+static inline void transaction_end(
+	struct capture *cap,
+	struct transaction *tran,
+	FILE *file,
+	bool complete)
+{
+	if (tran->num_packets > 0) {
+		// A transaction was in progress, write it out.
+		tran->complete = complete;
+		fwrite(tran, 1, sizeof(struct transaction), file);
+		cap->num_transactions++;
+	}
+}
+
+// Transaction decoder state.
+struct transaction_state {
+	enum pid first;
+	enum pid last;
+};
+
+// Update transaction state based on new packet.
+static inline void transaction_update(
+	struct capture *cap,
+	struct transaction *tran,
+	struct packet *pkt,
+	struct transaction_state *state,
+	FILE* file)
+{
+	switch (transaction_status(state->first, state->last, pkt->pid))
+	{
+	case TRANSACTION_NEW:
+		// New transaction. End any previous one as incomplete.
+		transaction_end(cap, tran, file, false);
+		// Packet is first of the new transaction.
+		tran->first_packet_index = cap->num_packets;
+		tran->num_packets = 1;
+		state->first = pkt->pid;
+		state->last = pkt->pid;
+		break;
+	case TRANSACTION_CONT:
+		// Packet is added to the current transaction.
+		tran->num_packets++;
+		state->last = pkt->pid;
+		break;
+	case TRANSACTION_DONE:
+		// Packet completes current transaction.
+		tran->num_packets++;
+		transaction_end(cap, tran, file, true);
+		// No transaction is now in progress.
+		tran->num_packets = 0;
+		state->first = 0;
+		state->last = 0;
+		break;
+	case TRANSACTION_INVALID:
+		// Packet not valid as part of any current transaction.
+		transaction_end(cap, tran, file, false);
+		// No transaction is now in progress.
+		tran->num_packets = 0;
+		state->first = 0;
+		state->last = 0;
+		break;
+	}
+}
+
 // A virtual file used for capture data.
 struct virtual_file {
 	const char *name;
@@ -164,8 +229,10 @@ struct capture* convert_capture(const char *filename)
 	}
 
 	// Used to track transaction state.
-	enum pid first = 0;
-	enum pid last = 0;
+	struct transaction_state state = {
+		.first = 0,
+		.last = 0,
+	};
 
 	while (1)
 	{
@@ -207,54 +274,7 @@ struct capture* convert_capture(const char *filename)
 			pkt.data_offset += pkt.length - 3;
 
 		// Update transaction state.
-		switch (transaction_update(first, last, pkt.pid))
-		{
-		case TRANSACTION_NEW:
-			// New transaction. Check if one was in progress.
-			if (tran.num_packets > 0) {
-				// A transaction was in progress.
-				// Write it out as incomplete.
-				tran.complete = false;
-				fwrite(&tran, 1, sizeof(tran), transactions.file);
-				cap->num_transactions++;
-			}
-			// Packet is first of the new transaction.
-			tran.first_packet_index = cap->num_packets;
-			tran.num_packets = 1;
-			first = pkt.pid;
-			last = pkt.pid;
-			break;
-		case TRANSACTION_CONT:
-			// Packet is added to the current transaction.
-			tran.num_packets++;
-			last = pkt.pid;
-			break;
-		case TRANSACTION_DONE:
-			// Packet completes current transaction.
-			tran.num_packets++;
-			tran.complete = true;
-			fwrite(&tran, 1, sizeof(tran), transactions.file);
-			cap->num_transactions++;
-			// No transaction is now in progress.
-			tran.num_packets = 0;
-			first = 0;
-			last = 0;
-			break;
-		case TRANSACTION_INVALID:
-			// Packet not valid as part of any current transaction.
-			if (tran.num_packets > 0) {
-				// A transaction was in progress.
-				// Write it out as incomplete.
-				tran.complete = false;
-				fwrite(&tran, 1, sizeof(tran), transactions.file);
-				cap->num_transactions++;
-			}
-			// No transaction is now in progress.
-			tran.num_packets = 0;
-			first = 0;
-			last = 0;
-			break;
-		}
+		transaction_update(cap, &tran, &pkt, &state, transactions.file);
 
 		// Increment packet count.
 		cap->num_packets++;
