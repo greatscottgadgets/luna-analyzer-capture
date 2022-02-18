@@ -20,6 +20,16 @@
       <property name="currentIndex">
        <number>0</number>
       </property>
+      <widget class="QWidget" name="eventTreeTab">
+       <attribute name="title">
+        <string>Event Tree</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout_7">
+        <item>
+         <widget class="QTreeView" name="eventTreeView"/>
+        </item>
+       </layout>
+      </widget>
       <widget class="QWidget" name="eventTab">
        <attribute name="title">
         <string>Events</string>
