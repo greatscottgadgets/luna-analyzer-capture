@@ -1,5 +1,6 @@
 capture
 luna2pcap
-convert
+decode_test
 library.so
+*.o
 __pycache__
