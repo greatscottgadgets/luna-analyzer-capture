@@ -195,7 +195,7 @@ transfer_status(bool control, enum pid last, enum pid next)
 }
 
 // Append a transaction to the current transfer.
-static inline void transfer_append(struct context *context)
+static inline void transfer_append(struct context *context, bool success)
 {
 	uint8_t address = context->transaction_state.address;
 	uint8_t endpoint = context->transaction_state.endpoint;
@@ -205,6 +205,8 @@ static inline void transfer_append(struct context *context)
 	uint64_t tran_idx = context->capture->num_transactions;
 	file_write(&ep_state->transaction_ids, &tran_idx, 1);
 	xfer->num_transactions++;
+	if (success)
+		ep_state->last = context->transaction_state.first;
 }
 
 // End a transfer if it was ongoing.
@@ -298,7 +300,7 @@ static inline void transfer_update(struct context *context)
 	struct transfer *xfer = &state->current_transfer;
 	if (xfer->num_transactions > 0 && status != TRANSFER_INVALID && !success)
 	{
-		transfer_append(context);
+		transfer_append(context, false);
 		return;
 	}
 
@@ -310,17 +312,15 @@ static inline void transfer_update(struct context *context)
 		// Transaction is first of the new transfer.
 		xfer->id_offset = traf->num_transaction_ids;
 		xfer->num_transactions = 0;
-		transfer_append(context);
-		state->last = transaction_type;
+		transfer_append(context, true);
 		break;
 	case TRANSFER_CONT:
 		// Transaction is added to the current transfer.
-		transfer_append(context);
-		state->last = transaction_type;
+		transfer_append(context, true);
 		break;
 	case TRANSFER_DONE:
 		// Transaction completes current transfer.
-		transfer_append(context);
+		transfer_append(context, true);
 		transfer_end(context, address, endpoint, true);
 		break;
 	case TRANSFER_INVALID:
