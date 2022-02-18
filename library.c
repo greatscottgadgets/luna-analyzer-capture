@@ -230,6 +230,10 @@ static inline void transfer_end(struct context *context, uint8_t address, uint8_
 		file_write(&ep_state->transfers, xfer, 1);
 		file_write(&context->transfer_index, &entry, 1);
 	}
+
+	// No transfer is now in progress.
+	xfer->num_transactions = 0;
+	ep_state->last = 0;
 }
 
 // Update transfer state based on new transaction on its endpoint.
@@ -318,16 +322,10 @@ static inline void transfer_update(struct context *context)
 		// Transaction completes current transfer.
 		transfer_append(context);
 		transfer_end(context, address, endpoint, true);
-		// No transfer is now in progress.
-		xfer->num_transactions = 0;
-		state->last = 0;
 		break;
 	case TRANSFER_INVALID:
 		// Transaction not valid as part of any current transfer.
 		transfer_end(context, address, endpoint, false);
-		// No transfer is now in progress.
-		xfer->num_transactions = 0;
-		state->last = 0;
 		break;
 	}
 }
@@ -436,6 +434,7 @@ transaction_status(enum pid first, enum pid last, enum pid next)
 // End a transaction if it was ongoing.
 static inline void transaction_end(struct context *context, bool complete)
 {
+	struct transaction_state *state = &context->transaction_state;
 	struct transaction *tran = &context->current_transaction;
 	if (tran->num_packets > 0) {
 		// A transaction was in progress.
@@ -447,6 +446,11 @@ static inline void transaction_end(struct context *context, bool complete)
 		// Write out transaction.
 		file_write(&context->transactions, tran, 1);
 	}
+
+	// No transaction is now in progress.
+	tran->num_packets = 0;
+	state->first = 0;
+	state->last = 0;
 }
 
 // Update transaction state based on new packet.
@@ -478,18 +482,10 @@ static inline void transaction_update(struct context *context)
 		// Packet completes current transaction.
 		tran->num_packets++;
 		transaction_end(context, true);
-		// No transaction is now in progress.
-		tran->num_packets = 0;
-		state->first = 0;
-		state->last = 0;
 		break;
 	case TRANSACTION_INVALID:
 		// Packet not valid as part of any current transaction.
 		transaction_end(context, false);
-		// No transaction is now in progress.
-		tran->num_packets = 0;
-		state->first = 0;
-		state->last = 0;
 		break;
 	}
 }
