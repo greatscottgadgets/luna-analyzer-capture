@@ -503,11 +503,31 @@ struct capture* convert_capture(const char *filename)
 	// Set up context structure.
 	struct context context = {
 		.capture = cap,
-		.packets = {"packets", &cap->num_packets, sizeof(struct packet)},
-		.transactions = {"transactions", &cap->num_transactions, sizeof(struct transaction)},
-		.endpoints = {"endpoints", &cap->num_endpoints, sizeof(struct endpoint)},
-		.transfer_index = {"transfer_index", &cap->num_transfers, sizeof(struct transfer_index_entry)},
-		.data = {"data", &cap->data_size, 1},
+		.packets = {
+			"packets",
+			&cap->num_packets,
+			sizeof(struct packet),
+		},
+		.transactions = {
+			"transactions",
+			&cap->num_transactions,
+			sizeof(struct transaction),
+		},
+		.endpoints = {
+			"endpoints",
+			&cap->num_endpoints,
+			sizeof(struct endpoint),
+		},
+		.transfer_index = {
+			"transfer_index",
+			&cap->num_transfers,
+			sizeof(struct transfer_index_entry),
+		},
+		.data = {
+			"data",
+			&cap->data_size,
+			sizeof(uint8_t),
+		},
 		.transaction_state = {
 			.first = 0,
 			.last = 0,
