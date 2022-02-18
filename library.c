@@ -262,6 +262,13 @@ static inline void transfer_start(struct context *context)
 	struct endpoint_traffic *traf = cap->endpoint_traffic[ep_state->endpoint_id];
 	struct transfer *xfer = &ep_state->current_transfer;
 
+	// Write out a transfer index entry.
+	struct transfer_index_entry entry = {
+		.endpoint_id = ep_state->endpoint_id,
+		.transfer_id = traf->num_transfers,
+	};
+	file_write(&context->transfer_index, &entry, 1);
+
 	// Transaction is first of the new transfer.
 	xfer->id_offset = traf->num_transaction_ids;
 	xfer->num_transactions = 0;
@@ -273,23 +280,11 @@ static inline void transfer_end(struct context *context, uint8_t address, uint8_
 {
 	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint];
 
-	if (!ep_state)
-		return;
-
-	struct capture *cap = context->capture;
 	struct transfer *xfer = &ep_state->current_transfer;
-	struct endpoint_traffic *ep_traf = cap->endpoint_traffic[ep_state->endpoint_id];
 	if (xfer->num_transactions > 0) {
-		// A transfer was in progress, prepare to write it out.
+		// A transfer was in progress, write it out.
 		xfer->complete = complete;
-		// Also prepare a transfer index entry.
-		struct transfer_index_entry entry = {
-			.endpoint_id = ep_state->endpoint_id,
-			.transfer_id = ep_traf->num_transfers,
-		};
-		// Write out transfer and index entry.
 		file_write(&ep_state->transfers, xfer, 1);
-		file_write(&context->transfer_index, &entry, 1);
 	}
 
 	// No transfer is now in progress.
