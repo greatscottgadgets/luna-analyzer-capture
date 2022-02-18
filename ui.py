@@ -14,6 +14,7 @@ pid_names = [
         "SPLIT", "IN", "NAK", "DATA1",
         "ERR", "SETUP", "STALL", "MDATA"]
 
+event_names = ["PKT", "TRN", "XFR"]
 
 class TableModel(QAbstractTableModel):
 
@@ -209,6 +210,64 @@ class TransferTableModel(TableModel):
             return str.join(", ", (str(endpoint_transaction_ids[i]) for i in range(start, end)))
 
 
+class EventTableModel(TableModel):
+
+    cols = ["Event Index", "Timestamp", "Type", "Type Index", "Subtype"]
+
+    INDEX, TIMESTAMP, TYPE, TYPE_INDEX, SUBTYPE = range(5)
+
+    def rowCount(self, parent):
+        return self.capture.num_events
+
+    def data(self, index, role):
+        if not index.isValid() or role != Qt.DisplayRole:
+            return None
+
+        row = index.row()
+        col = index.column()
+
+        if col == self.INDEX:
+            return row
+
+        event = self.capture.events[row]
+
+        if col == self.TYPE_INDEX:
+            return event.index
+
+        if col == self.TYPE:
+            return event_names[event.type]
+
+        if event.type == PACKET:
+            packet = self.capture.packets[event.index]
+        elif event.type == TRANSACTION:
+            transaction = self.capture.transactions[event.index]
+            packet_id = transaction.first_packet_index
+            packet = self.capture.packets[packet_id]
+        elif event.type == TRANSFER:
+            entry = self.capture.transfer_index[event.index]
+            traffic = self.capture.endpoint_traffic[entry.endpoint_id]
+            transfer = traffic.transfers[entry.transfer_id]
+            transaction_id = traffic.transaction_ids[transfer.id_offset]
+            transaction = self.capture.transactions[transaction_id]
+            packet_id = transaction.first_packet_index
+            packet = self.capture.packets[packet_id]
+
+        if col == self.TIMESTAMP:
+            offset_ns = packet.timestamp_ns - self.capture.packets[0].timestamp_ns
+            return "%.9f" % (offset_ns / 1e9)
+
+        if col == self.SUBTYPE:
+            if event.type in (PACKET, TRANSACTION):
+                return pid_names[packet.pid & 0b1111]
+            elif event.type == TRANSFER:
+                if packet.pid == SETUP:
+                    return "CONTROL"
+                elif packet.pid == IN:
+                    return "BULK IN"
+                elif packet.pid == OUT:
+                    return "BULK OUT"
+
+
 capture = convert_capture(sys.argv[1].encode('ascii'))
 QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 app = QApplication.instance() or QApplication([])
@@ -216,7 +275,8 @@ ui = QUiLoader().load('analyzer.ui')
 for modelClass, view in (
         (PacketTableModel, ui.packetView),
         (TransactionTableModel, ui.transactionView),
-        (TransferTableModel, ui.transferView)):
+        (TransferTableModel, ui.transferView),
+        (EventTableModel, ui.eventView)):
     model = modelClass(app, capture)
     view.setModel(model)
     header = view.horizontalHeader()

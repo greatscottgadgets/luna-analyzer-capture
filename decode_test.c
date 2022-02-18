@@ -16,8 +16,9 @@ int main(int argc, char *argv[])
 
 	struct capture *capture = convert_capture(filename);
 
-	printf("%s: %lu packets, %lu transactions, %lu endpoints, %lu transfers\n",
+	printf("%s: %lu events, %lu packets, %lu transactions, %lu endpoints, %lu transfers\n",
 		filename,
+		capture->num_events,
 		capture->num_packets,
 		capture->num_transactions,
 		capture->num_endpoints,

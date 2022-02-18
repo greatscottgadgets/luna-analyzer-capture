@@ -78,12 +78,25 @@ struct transfer_index_entry {
 	uint64_t transfer_id;
 };
 
+enum event_type {
+	PACKET,
+	TRANSACTION,
+	TRANSFER,
+};
+
+struct event {
+	uint64_t index;
+	uint8_t type;
+};
+
 struct capture {
+	uint64_t num_events;
 	uint64_t num_endpoints;
 	uint64_t num_transfers;
 	uint64_t num_transactions;
 	uint64_t num_packets;
 	uint64_t data_size;
+	struct event *events;
 	struct endpoint *endpoints;
 	struct endpoint_traffic **endpoint_traffic;
 	struct transfer_index_entry *transfer_index;

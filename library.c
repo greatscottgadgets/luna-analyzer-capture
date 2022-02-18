@@ -45,7 +45,7 @@ struct transaction_state {
 // Context structure for shared variables needed during decoding.
 struct context {
 	struct capture *capture;
-	struct virtual_file packets, transactions, endpoints, transfer_index, data;
+	struct virtual_file events, packets, transactions, endpoints, transfer_index, data;
 	struct endpoint_state *endpoint_states[MAX_DEVICES][MAX_ENDPOINTS];
 	struct transaction_state transaction_state;
 	struct transaction current_transaction;
@@ -106,6 +106,27 @@ static inline uint64_t nanotime(void)
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+// Create an event in the timeline.
+static inline void event_create(struct context *context, enum event_type type)
+{
+	struct capture *cap = context->capture;
+	struct event evt;
+	evt.type = type;
+	switch (type)
+	{
+		case PACKET:
+			evt.index = cap->num_packets;
+			break;
+		case TRANSACTION:
+			evt.index = cap->num_transactions;
+			break;
+		case TRANSFER:
+			evt.index = cap->num_transfers;
+			break;
+	}
+	file_write(&context->events, &evt, 1);
 }
 
 // Get endpoint state for current transaction.
@@ -332,6 +353,7 @@ static inline void transfer_update(struct context *context)
 	case TRANSFER_NEW:
 		// New transfer. End any previous one as incomplete.
 		transfer_end(context, address, endpoint, false);
+		event_create(context, TRANSFER);
 		transfer_start(context);
 		break;
 	case TRANSFER_CONT:
@@ -346,6 +368,7 @@ static inline void transfer_update(struct context *context)
 	case TRANSFER_INVALID:
 		// Transaction not valid as part of any current transfer.
 		transfer_end(context, address, endpoint, false);
+		event_create(context, TRANSACTION);
 		break;
 	}
 }
@@ -522,6 +545,7 @@ static inline void transaction_update(struct context *context)
 	case TRANSACTION_INVALID:
 		// Packet not valid as part of any current transaction.
 		transaction_end(context, false);
+		event_create(context, PACKET);
 		break;
 	}
 }
@@ -535,6 +559,11 @@ struct capture* convert_capture(const char *filename)
 	// Set up context structure.
 	struct context context = {
 		.capture = cap,
+		.events = {
+			"events",
+			&cap->num_events,
+			sizeof(struct event),
+		},
 		.packets = {
 			"packets",
 			&cap->num_packets,
@@ -567,6 +596,7 @@ struct capture* convert_capture(const char *filename)
 	};
 
 	// Open virtual files for capture data.
+	file_open(&context.events);
 	file_open(&context.packets);
 	file_open(&context.transactions);
 	file_open(&context.endpoints);
@@ -626,6 +656,7 @@ struct capture* convert_capture(const char *filename)
 	transaction_end(&context, false);
 
 	// Map completed files as capture arrays.
+	cap->events = file_map(&context.events);
 	cap->packets = file_map(&context.packets);
 	cap->transactions = file_map(&context.transactions);
 	cap->data = file_map(&context.data);
@@ -665,6 +696,7 @@ void close_capture(struct capture *cap)
 		munmap(traf->transaction_ids, sizeof(uint64_t) * traf->num_transaction_ids);
 		free(traf);
 	}
+	munmap(cap->events, sizeof(struct event) * cap->num_events);
 	munmap(cap->packets, sizeof(struct packet) * cap->num_packets);
 	munmap(cap->transactions, sizeof(struct transaction) * cap->num_transactions);
 	munmap(cap->endpoints, sizeof(struct endpoint) * cap->num_endpoints);
