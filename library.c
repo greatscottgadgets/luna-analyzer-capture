@@ -105,6 +105,49 @@ static inline uint64_t nanotime(void)
 	return ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
+// Get endpoint state for current transaction.
+static inline struct endpoint_state *endpoint_state(struct context *context)
+{
+	struct capture *cap = context->capture;
+	uint8_t address = context->transaction_state.address;
+	uint8_t endpoint = context->transaction_state.endpoint;
+	struct endpoint_state *state = context->endpoint_states[address][endpoint];
+	struct endpoint_traffic *traf;
+
+	if (state)
+		return state;
+
+	// Allocate and store new endpoint state.
+	state = malloc(sizeof(struct endpoint_state));
+	context->endpoint_states[address][endpoint] = state;
+	// Initialise endpoint state.
+	uint16_t endpoint_id = state->endpoint_id = cap->num_endpoints;
+	state->current_transfer.num_transactions = 0;
+	state->last = 0;
+	// Write a new endpoint entry.
+	struct endpoint ep = { .address = address, .endpoint = endpoint };
+	file_write(&context->endpoints, &ep, 1);
+	// Reallocate endpoint traffic pointer array to add an entry.
+	size_t entry_size = sizeof(struct endpoint_traffic);
+	size_t ptr_size = sizeof(struct endpoint_traffic *);
+	size_t new_size = cap->num_endpoints * ptr_size;
+	cap->endpoint_traffic = realloc(cap->endpoint_traffic, new_size);
+	cap->endpoint_traffic[endpoint_id] = malloc(entry_size);
+	traf = cap->endpoint_traffic[endpoint_id];
+	// Initialise endpoint traffic data.
+	traf->num_transfers = 0;
+	traf->num_transaction_ids = 0;
+	// Set up files for endpoint traffic data.
+	file_create(&state->transfers,
+		"transfers", endpoint_id,
+		&traf->num_transfers, sizeof(struct transfer));
+	file_create(&state->transaction_ids,
+		"transaction_ids", endpoint_id,
+		&traf->num_transaction_ids, sizeof(uint64_t));
+
+	return state;
+}
+
 // Possible transfer statuses after each new transaction.
 enum transfer_status {
 	// Transaction begins a new transfer.
@@ -246,42 +289,10 @@ static inline void transfer_update(struct context *context)
 	enum pid transaction_type = context->transaction_state.first;
 	uint8_t address = context->transaction_state.address;
 	uint8_t endpoint = context->transaction_state.endpoint;
-	struct endpoint_state *state = context->endpoint_states[address][endpoint];
-	struct endpoint_traffic *traf;
 
-	// If we don't have an endpoint state for this endpoint yet, create one.
-	if (state == NULL)
-	{
-		// Allocate and store new endpoint state.
-		state = malloc(sizeof(struct endpoint_state));
-		context->endpoint_states[address][endpoint] = state;
-		// Initialise endpoint state.
-		uint16_t endpoint_id = state->endpoint_id = cap->num_endpoints;
-		state->current_transfer.num_transactions = 0;
-		state->last = 0;
-		// Write a new endpoint entry.
-		struct endpoint ep = { .address = address, .endpoint = endpoint };
-		file_write(&context->endpoints, &ep, 1);
-		// Reallocate endpoint traffic pointer array to add an entry.
-		size_t entry_size = sizeof(struct endpoint_traffic);
-		size_t ptr_size = sizeof(struct endpoint_traffic *);
-		size_t new_size = cap->num_endpoints * ptr_size;
-		cap->endpoint_traffic = realloc(cap->endpoint_traffic, new_size);
-		cap->endpoint_traffic[endpoint_id] = malloc(entry_size);
-		traf = cap->endpoint_traffic[endpoint_id];
-		// Initialise endpoint traffic data.
-		traf->num_transfers = 0;
-		traf->num_transaction_ids = 0;
-		// Set up files for endpoint traffic data.
-		file_create(&state->transfers,
-			"transfers", endpoint_id,
-			&traf->num_transfers, sizeof(struct transfer));
-		file_create(&state->transaction_ids,
-			"transaction_ids", endpoint_id,
-			&traf->num_transaction_ids, sizeof(uint64_t));
-	} else {
-		traf = cap->endpoint_traffic[state->endpoint_id];
-	}
+	// Get endpoint state and traffic.
+	struct endpoint_state *state = endpoint_state(context);
+	struct endpoint_traffic *traf = cap->endpoint_traffic[state->endpoint_id];
 
 	// Whether this transaction is on the control endpoint.
 	bool control = (endpoint == 0);
