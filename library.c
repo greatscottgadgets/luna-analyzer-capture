@@ -252,6 +252,22 @@ static inline void transfer_append(struct context *context, bool success)
 		ep_state->last = context->transaction_state.first;
 }
 
+// Start a new transfer with the current transaction.
+static inline void transfer_start(struct context *context)
+{
+	struct capture *cap = context->capture;
+	uint8_t address = context->transaction_state.address;
+	uint8_t endpoint = context->transaction_state.endpoint;
+	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint];
+	struct endpoint_traffic *traf = cap->endpoint_traffic[ep_state->endpoint_id];
+	struct transfer *xfer = &ep_state->current_transfer;
+
+	// Transaction is first of the new transfer.
+	xfer->id_offset = traf->num_transaction_ids;
+	xfer->num_transactions = 0;
+	transfer_append(context, true);
+}
+
 // End a transfer if it was ongoing.
 static inline void transfer_end(struct context *context, uint8_t address, uint8_t endpoint, bool complete)
 {
@@ -284,15 +300,13 @@ static inline void transfer_end(struct context *context, uint8_t address, uint8_
 // Update transfer state based on new transaction on its endpoint.
 static inline void transfer_update(struct context *context)
 {
-	struct capture *cap = context->capture;
 	struct transaction *tran = &context->current_transaction;
 	enum pid transaction_type = context->transaction_state.first;
 	uint8_t address = context->transaction_state.address;
 	uint8_t endpoint = context->transaction_state.endpoint;
 
-	// Get endpoint state and traffic.
+	// Get endpoint state.
 	struct endpoint_state *state = endpoint_state(context);
-	struct endpoint_traffic *traf = cap->endpoint_traffic[state->endpoint_id];
 
 	// Whether this transaction is on the control endpoint.
 	bool control = (endpoint == 0);
@@ -320,10 +334,7 @@ static inline void transfer_update(struct context *context)
 	case TRANSFER_NEW:
 		// New transfer. End any previous one as incomplete.
 		transfer_end(context, address, endpoint, false);
-		// Transaction is first of the new transfer.
-		xfer->id_offset = traf->num_transaction_ids;
-		xfer->num_transactions = 0;
-		transfer_append(context, true);
+		transfer_start(context);
 		break;
 	case TRANSFER_CONT:
 		// Transaction is added to the current transfer.
