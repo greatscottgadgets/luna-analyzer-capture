@@ -431,6 +431,17 @@ transaction_status(enum pid first, enum pid last, enum pid next)
 	return TRANSACTION_INVALID;
 }
 
+// Append packet to the current transaction.
+static inline void transaction_append(struct context *context)
+{
+	struct transaction_state *state = &context->transaction_state;
+	struct transaction *tran = &context->current_transaction;
+	struct packet *pkt = &context->current_packet;
+
+	tran->num_packets++;
+	state->last = pkt->pid;
+}
+
 // End a transaction if it was ongoing.
 static inline void transaction_end(struct context *context, bool complete)
 {
@@ -439,8 +450,6 @@ static inline void transaction_end(struct context *context, bool complete)
 	if (tran->num_packets > 0) {
 		// A transaction was in progress.
 		tran->complete = complete;
-		// Update transaction state for use by transfer update.
-		context->transaction_state.last = context->current_packet.pid;
 		// Update transfer state.
 		transfer_update(context);
 		// Write out transaction.
@@ -467,20 +476,19 @@ static inline void transaction_update(struct context *context)
 		transaction_end(context, false);
 		// Packet is first of the new transaction.
 		tran->first_packet_index = context->capture->num_packets;
-		tran->num_packets = 1;
+		tran->num_packets = 0;
 		state->first = pkt->pid;
-		state->last = pkt->pid;
 		state->address = pkt->fields.token.address;
 		state->endpoint = pkt->fields.token.endpoint;
+		transaction_append(context);
 		break;
 	case TRANSACTION_CONT:
 		// Packet is added to the current transaction.
-		tran->num_packets++;
-		state->last = pkt->pid;
+		transaction_append(context);
 		break;
 	case TRANSACTION_DONE:
 		// Packet completes current transaction.
-		tran->num_packets++;
+		transaction_append(context);
 		transaction_end(context, true);
 		break;
 	case TRANSACTION_INVALID:
