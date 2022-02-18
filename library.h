@@ -93,3 +93,4 @@ struct capture {
 };
 
 struct capture* convert_capture(const char *filename);
+void close_capture(struct capture *capture);

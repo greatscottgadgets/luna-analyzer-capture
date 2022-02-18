@@ -94,6 +94,9 @@ static inline void * file_map(struct virtual_file *file)
 	file->map_length = *file->count_ptr * file->item_size;
 	// Create mapping.
 	file->map = mmap(NULL, file->map_length, PROT_READ, MAP_SHARED, file->fd, 0);
+	// Close file.
+	fclose(file->file);
+	// Return mapping.
 	return file->map;
 }
 
@@ -616,6 +619,9 @@ struct capture* convert_capture(const char *filename)
 		file_write(&context.packets, pkt, 1);
 	}
 
+	// Close input file.
+	fclose(input_file);
+
 	// End any ongoing transaction.
 	transaction_end(&context, false);
 
@@ -638,10 +644,32 @@ struct capture* convert_capture(const char *filename)
 		// Map completed files as endpoint traffic arrays.
 		traf->transfers = file_map(&state->transfers);
 		traf->transaction_ids = file_map(&state->transaction_ids);
+
+		// Free memory allocated for this endpoint.
+		free(state->transfers.name);
+		free(state->transaction_ids.name);
+		free(state);
 	}
 
 	// Map transfer index last, since we may have added pending transfers.
 	cap->transfer_index = file_map(&context.transfer_index);
 
 	return cap;
+}
+
+void close_capture(struct capture *cap)
+{
+	for (int i = 0; i < cap->num_endpoints; i++) {
+		struct endpoint_traffic *traf = cap->endpoint_traffic[i];
+		munmap(traf->transfers, sizeof(struct transfer) * traf->num_transfers);
+		munmap(traf->transaction_ids, sizeof(uint64_t) * traf->num_transaction_ids);
+		free(traf);
+	}
+	munmap(cap->packets, sizeof(struct packet) * cap->num_packets);
+	munmap(cap->transactions, sizeof(struct transaction) * cap->num_transactions);
+	munmap(cap->endpoints, sizeof(struct endpoint) * cap->num_endpoints);
+	munmap(cap->transfer_index, sizeof(struct transfer_index_entry) * cap->num_transfers);
+	munmap(cap->data, cap->data_size);
+	free(cap->endpoint_traffic);
+	free(cap);
 }
