@@ -321,6 +321,13 @@ static inline void transfer_update(struct context *context)
 {
 	struct transaction *tran = &context->current_transaction;
 	enum pid transaction_type = context->transaction_state.first;
+
+	if (transaction_type == SOF)
+	{
+		event_create(context, TRANSACTION);
+		return;
+	}
+
 	uint8_t address = context->transaction_state.address;
 	uint8_t endpoint = context->transaction_state.endpoint;
 
@@ -403,6 +410,15 @@ transaction_status(enum pid first, enum pid last, enum pid next)
 	// Otherwise, result depends on last PID.
 	switch (last)
 	{
+	case NONE:
+		if (next == SOF)
+			return TRANSACTION_NEW;
+		break;
+	case SOF:
+		// Allow any number of SOFs to form a transaction.
+		if (next == SOF)
+			return TRANSACTION_CONT;
+		break;
 	case SETUP:
 		// SETUP must be followed by DATA0.
 		if (next == DATA0)
@@ -485,8 +501,10 @@ static inline void transaction_start(struct context *context)
 	tran->num_packets = 1;
 	state->first = pkt->pid;
 	state->last = pkt->pid;
-	state->address = pkt->fields.token.address;
-	state->endpoint = pkt->fields.token.endpoint;
+	if (pkt->pid != SOF) {
+		state->address = pkt->fields.token.address;
+		state->endpoint = pkt->fields.token.endpoint;
+	};
 }
 
 // Append packet to the current transaction.
@@ -506,12 +524,16 @@ static inline void transaction_end(struct context *context, bool complete)
 	struct transaction_state *state = &context->transaction_state;
 	struct transaction *tran = &context->current_transaction;
 	if (tran->num_packets > 0) {
-		// A transaction was in progress.
-		tran->complete = complete;
-		// Update transfer state.
-		transfer_update(context);
-		// Write out transaction.
-		file_write(&context->transactions, tran, 1);
+		// Don't bother creating a "transaction" for a single SOF.
+		if (!(state->first == SOF && tran->num_packets == 1))
+		{
+			// A transaction was in progress.
+			tran->complete = complete;
+			// Update transfer state.
+			transfer_update(context);
+			// Write out transaction.
+			file_write(&context->transactions, tran, 1);
+		}
 	}
 
 	// No transaction is now in progress.

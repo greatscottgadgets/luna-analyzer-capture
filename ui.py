@@ -118,10 +118,12 @@ class TransactionTableModel(TableModel):
             return pid_names[first_packet.pid & 0b1111]
 
         if col == self.ADDR:
-            return first_packet.fields.token.address
+            if first_packet.pid in (SETUP, IN, OUT):
+                return first_packet.fields.token.address
 
         if col == self.EP:
-            return first_packet.fields.token.endpoint
+            if first_packet.pid in (SETUP, IN, OUT):
+                return first_packet.fields.token.endpoint
 
         if col == self.PACKETS:
             return str.join(", ", (str(i) for i in range(start, end)))
@@ -133,12 +135,16 @@ class TransactionTableModel(TableModel):
                 return pid_names[last_packet.pid & 0b1111]
 
         data_valid = transaction.num_packets > 1 and packets[1].pid & PID_TYPE_MASK == DATA
+
+        if not data_valid:
+            return
+
         data_packet = packets[1]
 
-        if col == self.DATA_BYTES and data_valid:
+        if col == self.DATA_BYTES:
             return data_packet.length - 3
 
-        if col == self.DATA and data_valid:
+        if col == self.DATA:
             start = data_packet.data_offset
             end = start + data_packet.length - 3
             packet_data = self.capture.data[start:end]
