@@ -86,9 +86,9 @@ class PacketTableModel(TableModel):
 
 class TransactionTableModel(TableModel):
 
-    cols = ["Transaction Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Packets", "Result", "Data Bytes", "Data"]
+    cols = ["Transaction Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Packet Idx", "Packets", "Result", "Data Bytes", "Data"]
 
-    INDEX, TIMESTAMP, DURATION, TYPE, ADDR, EP, PACKETS, RESULT, DATA_BYTES, DATA = range(10)
+    INDEX, TIMESTAMP, DURATION, TYPE, ADDR, EP, PACKET_IDX, NUM_PACKETS, RESULT, DATA_BYTES, DATA = range(11)
 
     def rowCount(self, parent):
         return self.capture.num_transactions
@@ -128,8 +128,11 @@ class TransactionTableModel(TableModel):
             if first_packet.pid in (SETUP, IN, OUT):
                 return first_packet.fields.token.endpoint
 
-        if col == self.PACKETS:
-            return str.join(", ", (str(i) for i in range(start, end)))
+        if col == self.PACKET_IDX:
+            return transaction.first_packet_index
+
+        if col == self.NUM_PACKETS:
+            return transaction.num_packets
 
         if col == self.RESULT:
             if not transaction.complete:
