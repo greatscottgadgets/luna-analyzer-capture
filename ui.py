@@ -366,14 +366,16 @@ class EventTreeModel(QAbstractItemModel):
         self.capture = capture
         self.root_item = EventTreeItem(self.capture, CAPTURE)
 
+    def item(self, index):
+        if not index.isValid():
+            return self.root_item
+        else:
+            return index.internalPointer()
+
     def rowCount(self, parent):
         if parent.column() > 0:
             return 0
-        if not parent.isValid():
-            parent_item = self.root_item
-        else:
-            parent_item = parent.internalPointer()
-        return parent_item.child_count()
+        return self.item(parent).child_count()
 
     def columnCount(self, parent):
         return len(EventTreeItem.cols)
@@ -391,35 +393,25 @@ class EventTreeModel(QAbstractItemModel):
     def index(self, row, column, parent):
         if not self.hasIndex(row, column, parent):
             return QModelIndex()
-        if not parent.isValid():
-            parent_item = self.root_item
-        else:
-            parent_item = parent.internalPointer()
-        child_item = parent_item.child(row)
+        child_item = self.item(parent).child(row)
         if child_item:
             return self.createIndex(row, column, child_item)
         else:
             return QModelIndex()
 
     def parent(self, index):
-        if not index.isValid():
+        item = self.item(index)
+        if self.root_item in (item, item.parent_item):
             return QModelIndex()
-        child_item = index.internalPointer()
-        parent_item = child_item.parent_item
-        if parent_item is self.root_item:
-            return QModelIndex()
-        grandparent_item = parent_item.parent_item
-        if grandparent_item:
-            parent_index = parent_item.parent_row
+        if item.parent_item.parent_item:
+            parent_index = item.parent_item.parent_row
         else:
             parent_index = 0
-        return self.createIndex(parent_index, 0, parent_item)
+        return self.createIndex(parent_index, 0, item.parent_item)
 
     def data(self, index, role):
-        if not index.isValid() or role != Qt.DisplayRole:
-            return None
-        item = index.internalPointer()
-        return item.data(index.column())
+        if role == Qt.DisplayRole:
+            return self.item(index).data(index.column())
 
 
 capture = convert_capture(sys.argv[1].encode('ascii'))
