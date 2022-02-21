@@ -12,8 +12,6 @@ faulthandler.enable()
 
 event_names = ["PKT", "TRN", "XFR"]
 
-CAPTURE = len(event_names)
-
 class TableModel(QAbstractTableModel):
 
     def __init__(self, parent, capture):
