@@ -9,12 +9,6 @@ import sys
 
 faulthandler.enable()
 
-pid_names = [
-        "RSVD", "OUT", "ACK", "DATA0",
-        "PING", "SOF", "NYET", "DATA2",
-        "SPLIT", "IN", "NAK", "DATA1",
-        "ERR", "SETUP", "STALL", "MDATA"]
-
 event_names = ["PKT", "TRN", "XFR"]
 
 CAPTURE = len(event_names)
