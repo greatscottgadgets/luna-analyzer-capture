@@ -16,39 +16,57 @@
 
 // A virtual file used for capture data.
 struct virtual_file {
+	// Filename
 	char *name;
+	// Pointer to count that should be increased when items are written.
 	uint64_t *count_ptr;
+	// Size of an item.
 	size_t item_size;
+	// File descriptor.
 	int fd;
+	// Buffered stream.
 	FILE *file;
-	void *map;
-	size_t map_length;
 };
 
-// Transfer decoder state.
+// Per-endpoint state.
 struct endpoint_state {
+	// The current transfer on this endpoint.
 	struct transfer current_transfer;
+	// Output stream for transfers on this endpoint.
 	struct virtual_file transfers;
+	// Output stream for indices of transactions on this endpoint.
 	struct virtual_file transaction_ids;
+	// Index of this endpoint in the endpoint stream.
 	uint16_t endpoint_id;
+	// PID that began the last transaction in the current transfer.
 	enum pid last;
 };
 
 // Transaction decoder state.
 struct transaction_state {
+	// PID of the first packet in the current transaction.
 	enum pid first;
+	// PID of the last packet in the current transaction.
 	enum pid last;
+	// Bus address of the current transaction.
 	uint8_t address;
-	uint8_t endpoint;
+	// Endpoint number of the current transaction.
+	uint8_t endpoint_num;
 };
 
 // Context structure for shared variables needed during decoding.
 struct context {
+	// Capture which we are decoding.
 	struct capture *capture;
+	// Main output streams.
 	struct virtual_file events, packets, transactions, endpoints, transfer_index, data;
+	// Array of pointers to to per-endpoint states.
 	struct endpoint_state *endpoint_states[MAX_DEVICES][MAX_ENDPOINTS];
+	// Transaction decoder state.
 	struct transaction_state transaction_state;
+	// The current transaction on the bus.
 	struct transaction current_transaction;
+	// The current packet on the bus.
 	struct packet current_packet;
 };
 
@@ -91,13 +109,13 @@ static inline void * file_map(struct virtual_file *file)
 	// Flush buffered writes.
 	fflush(file->file);
 	// Calculate mapping size.
-	file->map_length = *file->count_ptr * file->item_size;
+	size_t map_length = *file->count_ptr * file->item_size;
 	// Create mapping.
-	file->map = mmap(NULL, file->map_length, PROT_READ, MAP_SHARED, file->fd, 0);
+	void *map = mmap(NULL, map_length, PROT_READ, MAP_SHARED, file->fd, 0);
 	// Close file.
 	fclose(file->file);
 	// Return mapping.
-	return file->map;
+	return map;
 }
 
 // Time as nanoseconds since Unix epoch (good for next 500 years).
@@ -117,13 +135,13 @@ static inline void event_create(struct context *context, enum event_type type)
 	switch (type)
 	{
 		case PACKET:
-			evt.index = cap->num_packets;
+			evt.id = cap->num_packets;
 			break;
 		case TRANSACTION:
-			evt.index = cap->num_transactions;
+			evt.id = cap->num_transactions;
 			break;
 		case TRANSFER:
-			evt.index = cap->num_transfers;
+			evt.id = cap->num_transfers;
 			break;
 	}
 	file_write(&context->events, &evt, 1);
@@ -134,42 +152,46 @@ static inline struct endpoint_state *endpoint_state(struct context *context)
 {
 	struct capture *cap = context->capture;
 	uint8_t address = context->transaction_state.address;
-	uint8_t endpoint = context->transaction_state.endpoint;
-	struct endpoint_state *state = context->endpoint_states[address][endpoint];
-	struct endpoint_traffic *traf;
+	uint8_t endpoint_num = context->transaction_state.endpoint_num;
+	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint_num];
 
-	if (state)
-		return state;
+	if (ep_state)
+		return ep_state;
 
 	// Allocate and store new endpoint state.
-	state = malloc(sizeof(struct endpoint_state));
-	context->endpoint_states[address][endpoint] = state;
+	ep_state = malloc(sizeof(struct endpoint_state));
+	context->endpoint_states[address][endpoint_num] = ep_state;
+
 	// Initialise endpoint state.
-	uint16_t endpoint_id = state->endpoint_id = cap->num_endpoints;
-	state->current_transfer.num_transactions = 0;
-	state->last = 0;
+	uint16_t endpoint_id = ep_state->endpoint_id = cap->num_endpoints;
+	ep_state->current_transfer.num_transactions = 0;
+	ep_state->last = 0;
+
 	// Write a new endpoint entry.
-	struct endpoint ep = { .address = address, .endpoint = endpoint };
+	struct endpoint ep = { .address = address, .endpoint_num = endpoint_num };
 	file_write(&context->endpoints, &ep, 1);
+
 	// Reallocate endpoint traffic pointer array to add an entry.
 	size_t entry_size = sizeof(struct endpoint_traffic);
 	size_t ptr_size = sizeof(struct endpoint_traffic *);
 	size_t new_size = cap->num_endpoints * ptr_size;
 	cap->endpoint_traffic = realloc(cap->endpoint_traffic, new_size);
 	cap->endpoint_traffic[endpoint_id] = malloc(entry_size);
-	traf = cap->endpoint_traffic[endpoint_id];
-	// Initialise endpoint traffic data.
-	traf->num_transfers = 0;
-	traf->num_transaction_ids = 0;
-	// Set up files for endpoint traffic data.
-	file_create(&state->transfers,
-		"transfers", endpoint_id,
-		&traf->num_transfers, sizeof(struct transfer));
-	file_create(&state->transaction_ids,
-		"transaction_ids", endpoint_id,
-		&traf->num_transaction_ids, sizeof(uint64_t));
+	struct endpoint_traffic *ep_traf = cap->endpoint_traffic[endpoint_id];
 
-	return state;
+	// Initialise endpoint traffic data.
+	ep_traf->num_transfers = 0;
+	ep_traf->num_transaction_ids = 0;
+
+	// Set up files for endpoint traffic data.
+	file_create(&ep_state->transfers,
+		"transfers", endpoint_id,
+		&ep_traf->num_transfers, sizeof(struct transfer));
+	file_create(&ep_state->transaction_ids,
+		"transaction_ids", endpoint_id,
+		&ep_traf->num_transaction_ids, sizeof(uint64_t));
+
+	return ep_state;
 }
 
 // Possible transfer statuses after each new transaction.
@@ -265,8 +287,8 @@ transfer_status(bool control, enum pid last, enum pid next)
 static inline void transfer_append(struct context *context, bool success)
 {
 	uint8_t address = context->transaction_state.address;
-	uint8_t endpoint = context->transaction_state.endpoint;
-	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint];
+	uint8_t endpoint_num = context->transaction_state.endpoint_num;
+	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint_num];
 	struct transfer *xfer = &ep_state->current_transfer;
 
 	uint64_t tran_idx = context->capture->num_transactions;
@@ -281,28 +303,28 @@ static inline void transfer_start(struct context *context)
 {
 	struct capture *cap = context->capture;
 	uint8_t address = context->transaction_state.address;
-	uint8_t endpoint = context->transaction_state.endpoint;
-	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint];
-	struct endpoint_traffic *traf = cap->endpoint_traffic[ep_state->endpoint_id];
+	uint8_t endpoint_num = context->transaction_state.endpoint_num;
+	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint_num];
+	struct endpoint_traffic *ep_traf = cap->endpoint_traffic[ep_state->endpoint_id];
 	struct transfer *xfer = &ep_state->current_transfer;
 
 	// Write out a transfer index entry.
 	struct transfer_index_entry entry = {
 		.endpoint_id = ep_state->endpoint_id,
-		.transfer_id = traf->num_transfers,
+		.transfer_id = ep_traf->num_transfers,
 	};
 	file_write(&context->transfer_index, &entry, 1);
 
 	// Transaction is first of the new transfer.
-	xfer->id_offset = traf->num_transaction_ids;
+	xfer->ep_tran_offset = ep_traf->num_transaction_ids;
 	xfer->num_transactions = 0;
 	transfer_append(context, true);
 }
 
 // End a transfer if it was ongoing.
-static inline void transfer_end(struct context *context, uint8_t address, uint8_t endpoint, bool complete)
+static inline void transfer_end(struct context *context, uint8_t address, uint8_t endpoint_num, bool complete)
 {
-	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint];
+	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint_num];
 
 	struct transfer *xfer = &ep_state->current_transfer;
 	if (xfer->num_transactions > 0) {
@@ -329,16 +351,16 @@ static inline void transfer_update(struct context *context)
 	}
 
 	uint8_t address = context->transaction_state.address;
-	uint8_t endpoint = context->transaction_state.endpoint;
+	uint8_t endpoint_num = context->transaction_state.endpoint_num;
 
 	// Get endpoint state.
-	struct endpoint_state *state = endpoint_state(context);
+	struct endpoint_state *ep_state = endpoint_state(context);
 
 	// Whether this transaction is on the control endpoint.
-	bool control = (endpoint == 0);
+	bool control = (endpoint_num == 0);
 
 	// Check effect of this transaction on the transfer state.
-	enum transfer_status status = transfer_status(control, state->last, transaction_type);
+	enum transfer_status status = transfer_status(control, ep_state->last, transaction_type);
 
 	// A transaction is successful if it has three packets and completed with ACK.
 	bool success =
@@ -348,7 +370,7 @@ static inline void transfer_update(struct context *context)
 
 	// If a transfer is in progress, and the transaction would have been valid
 	// but was not successful, append it to the transfer without changing state.
-	struct transfer *xfer = &state->current_transfer;
+	struct transfer *xfer = &ep_state->current_transfer;
 	if (xfer->num_transactions > 0 && status != TRANSFER_INVALID && !success)
 	{
 		transfer_append(context, false);
@@ -359,7 +381,7 @@ static inline void transfer_update(struct context *context)
 	{
 	case TRANSFER_NEW:
 		// New transfer. End any previous one as incomplete.
-		transfer_end(context, address, endpoint, false);
+		transfer_end(context, address, endpoint_num, false);
 		event_create(context, TRANSFER);
 		transfer_start(context);
 		break;
@@ -370,11 +392,11 @@ static inline void transfer_update(struct context *context)
 	case TRANSFER_DONE:
 		// Transaction completes current transfer.
 		transfer_append(context, true);
-		transfer_end(context, address, endpoint, true);
+		transfer_end(context, address, endpoint_num, true);
 		break;
 	case TRANSFER_INVALID:
 		// Transaction not valid as part of any current transfer.
-		transfer_end(context, address, endpoint, false);
+		transfer_end(context, address, endpoint_num, false);
 		event_create(context, TRANSACTION);
 		break;
 	}
@@ -497,13 +519,13 @@ static inline void transaction_start(struct context *context)
 	struct transaction *tran = &context->current_transaction;
 	struct packet *pkt = &context->current_packet;
 
-	tran->first_packet_index = context->capture->num_packets;
+	tran->first_packet_id = context->capture->num_packets;
 	tran->num_packets = 1;
 	state->first = pkt->pid;
 	state->last = pkt->pid;
 	if (pkt->pid != SOF) {
 		state->address = pkt->fields.token.address;
-		state->endpoint = pkt->fields.token.endpoint;
+		state->endpoint_num = pkt->fields.token.endpoint_num;
 	};
 }
 
@@ -688,20 +710,20 @@ struct capture* convert_capture(const char *filename)
 	for (int i = 0; i < cap->num_endpoints; i++)
 	{
 		struct endpoint *ep = &cap->endpoints[i];
-		struct endpoint_state *state = context.endpoint_states[ep->address][ep->endpoint];
-		struct endpoint_traffic *traf = cap->endpoint_traffic[i];
+		struct endpoint_state *ep_state = context.endpoint_states[ep->address][ep->endpoint_num];
+		struct endpoint_traffic *ep_traf = cap->endpoint_traffic[i];
 
 		// End any transfer still ongoing on this endpoint as incomplete.
-		transfer_end(&context, ep->address, ep->endpoint, false);
+		transfer_end(&context, ep->address, ep->endpoint_num, false);
 
 		// Map completed files as endpoint traffic arrays.
-		traf->transfers = file_map(&state->transfers);
-		traf->transaction_ids = file_map(&state->transaction_ids);
+		ep_traf->transfers = file_map(&ep_state->transfers);
+		ep_traf->transaction_ids = file_map(&ep_state->transaction_ids);
 
 		// Free memory allocated for this endpoint.
-		free(state->transfers.name);
-		free(state->transaction_ids.name);
-		free(state);
+		free(ep_state->transfers.name);
+		free(ep_state->transaction_ids.name);
+		free(ep_state);
 	}
 
 	// Map transfer index last, since we may have added pending transfers.
@@ -713,10 +735,10 @@ struct capture* convert_capture(const char *filename)
 void close_capture(struct capture *cap)
 {
 	for (int i = 0; i < cap->num_endpoints; i++) {
-		struct endpoint_traffic *traf = cap->endpoint_traffic[i];
-		munmap(traf->transfers, sizeof(struct transfer) * traf->num_transfers);
-		munmap(traf->transaction_ids, sizeof(uint64_t) * traf->num_transaction_ids);
-		free(traf);
+		struct endpoint_traffic *ep_traf = cap->endpoint_traffic[i];
+		munmap(ep_traf->transfers, sizeof(struct transfer) * ep_traf->num_transfers);
+		munmap(ep_traf->transaction_ids, sizeof(uint64_t) * ep_traf->num_transaction_ids);
+		free(ep_traf);
 	}
 	munmap(cap->events, sizeof(struct event) * cap->num_events);
 	munmap(cap->packets, sizeof(struct packet) * cap->num_packets);

@@ -1,18 +1,9 @@
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GObject
-
-from interface import *
 from treeitem import EventTreeItem
 
-import faulthandler
-import sys
-
-faulthandler.enable()
-
-
 # Implementation of Gtk.TreeModel interface.
-
 class EventTreeModel(GObject.GObject, Gtk.TreeModel):
 
     # Hack to allow us to retrieve existing items by their python id(),
@@ -125,16 +116,3 @@ class EventTreeModel(GObject.GObject, Gtk.TreeModel):
     def do_get_value(self, iterator, column):
         item = self.retrieve(iterator)
         return item.data(column)
-
-
-capture = convert_capture(sys.argv[1].encode('ascii'))
-model = EventTreeModel(capture)
-builder = Gtk.Builder()
-builder.add_from_file("analyzer.glade")
-window = builder.get_object("window")
-window.connect('destroy', lambda *a: Gtk.main_quit())
-view = builder.get_object("view")
-view.set_model(model)
-view.append_column(Gtk.TreeViewColumn('Event', Gtk.CellRendererText(), text=0))
-window.show_all()
-Gtk.main()

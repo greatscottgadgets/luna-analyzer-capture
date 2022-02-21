@@ -1,17 +1,7 @@
-from PySide6.QtWidgets import QApplication, QHeaderView, QTableView
-from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import Qt, QCoreApplication, QAbstractTableModel, \
-        QAbstractItemModel, QModelIndex
-
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from interface import *
-from treeitem import EventTreeItem
-import faulthandler
-import sys
 
-faulthandler.enable()
-
-event_names = ["PKT", "TRN", "XFR"]
-
+# Base class for table models
 class TableModel(QAbstractTableModel):
 
     def __init__(self, parent, capture):
@@ -26,7 +16,7 @@ class TableModel(QAbstractTableModel):
             return self.cols[section]
         return None
 
-
+# Table model for packets
 class PacketTableModel(TableModel):
 
     cols = ["Packet Index", "Timestamp", "Addr", "EP", "PID", "Length", "Data"]
@@ -59,11 +49,11 @@ class PacketTableModel(TableModel):
 
         if col == self.EP:
             if packet.pid in (SETUP, IN, OUT):
-                return packet.fields.token.endpoint
+                return packet.fields.token.endpoint_num
             return None
 
         if col == self.PID:
-            return pid_names[packet.pid & 0b1111]
+            return pid_names[packet.pid & PID_MASK]
 
         if col == self.LENGTH:
             return packet.length
@@ -76,7 +66,7 @@ class PacketTableModel(TableModel):
             packet_data = self.capture.data[start:end]
             return str.join(" ", ("%02X" % byte for byte in packet_data))
 
-
+# Table model for transactions
 class TransactionTableModel(TableModel):
 
     cols = ["Transaction Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Packet Idx", "Packets", "Result", "Data Bytes", "Data"]
@@ -97,7 +87,7 @@ class TransactionTableModel(TableModel):
             return row
 
         transaction = self.capture.transactions[row]
-        start = transaction.first_packet_index
+        start = transaction.first_packet_id
         end = start + transaction.num_packets
         packets = self.capture.packets[start:end]
         first_packet = packets[0]
@@ -111,7 +101,7 @@ class TransactionTableModel(TableModel):
             return last_packet.timestamp_ns - first_packet.timestamp_ns
 
         if col == self.TYPE:
-            return pid_names[first_packet.pid & 0b1111]
+            return pid_names[first_packet.pid & PID_MASK]
 
         if col == self.ADDR:
             if first_packet.pid in (SETUP, IN, OUT):
@@ -119,10 +109,10 @@ class TransactionTableModel(TableModel):
 
         if col == self.EP:
             if first_packet.pid in (SETUP, IN, OUT):
-                return first_packet.fields.token.endpoint
+                return first_packet.fields.token.endpoint_num
 
         if col == self.PACKET_IDX:
-            return transaction.first_packet_index
+            return transaction.first_packet_id
 
         if col == self.NUM_PACKETS:
             return transaction.num_packets
@@ -131,7 +121,7 @@ class TransactionTableModel(TableModel):
             if not transaction.complete:
                 return "ERR"
             else:
-                return pid_names[last_packet.pid & 0b1111]
+                return pid_names[last_packet.pid & PID_MASK]
 
         data_valid = transaction.num_packets > 1 and packets[1].pid & PID_TYPE_MASK == DATA
 
@@ -149,7 +139,7 @@ class TransactionTableModel(TableModel):
             packet_data = self.capture.data[start:end]
             return str.join(" ", ("%02X" % byte for byte in packet_data))
 
-
+# Table model for transfers
 class TransferTableModel(TableModel):
 
     cols = ["Transfer Index", "Timestamp", "Duration", "Type", "Addr", "EP", "Transactions", "Transaction Indices"]
@@ -170,20 +160,17 @@ class TransferTableModel(TableModel):
             return row
 
         entry = self.capture.transfer_index[row]
-        endpoint_id = entry.endpoint_id
-        transfer_id = entry.transfer_id
-        endpoint = self.capture.endpoints[endpoint_id]
-        endpoint_traffic = self.capture.endpoint_traffic[endpoint_id]
-        transfer = endpoint_traffic.transfers[transfer_id]
-        endpoint_transaction_ids = endpoint_traffic.transaction_ids
-        first_id = transfer.id_offset
+        endpoint = self.capture.endpoints[entry.endpoint_id]
+        ep_traffic = self.capture.endpoint_traffic[entry.endpoint_id]
+        transfer = ep_traffic.transfers[entry.transfer_id]
+        first_id = transfer.ep_tran_offset
         last_id = first_id + transfer.num_transactions - 1
-        first_transaction = self.capture.transactions[endpoint_transaction_ids[first_id]]
-        last_transaction = self.capture.transactions[endpoint_transaction_ids[last_id]]
-        first_packet_index = first_transaction.first_packet_index
-        last_packet_index = last_transaction.first_packet_index + last_transaction.num_packets - 1
-        first_packet = self.capture.packets[first_packet_index]
-        last_packet = self.capture.packets[last_packet_index]
+        first_transaction = self.capture.transactions[ep_traffic.transaction_ids[first_id]]
+        last_transaction = self.capture.transactions[ep_traffic.transaction_ids[last_id]]
+        first_packet_id = first_transaction.first_packet_id
+        last_packet_id = last_transaction.first_packet_id + last_transaction.num_packets - 1
+        first_packet = self.capture.packets[first_packet_id]
+        last_packet = self.capture.packets[last_packet_id]
 
         if col == self.TIMESTAMP:
             offset_ns = first_packet.timestamp_ns - self.capture.packets[0].timestamp_ns
@@ -204,7 +191,7 @@ class TransferTableModel(TableModel):
             return endpoint.address
 
         if col == self.EP:
-            return endpoint.endpoint
+            return endpoint.endpoint_num
 
         if col == self.TRANSACTIONS:
             return transfer.num_transactions
@@ -212,14 +199,16 @@ class TransferTableModel(TableModel):
         if col == self.INDICES:
             start = first_id
             end = min(last_id + 1, start + 100)
-            return str.join(", ", (str(endpoint_transaction_ids[i]) for i in range(start, end)))
+            return str.join(", ", (str(ep_traffic.transaction_ids[i]) for i in range(start, end)))
 
-
+# Table model for events
 class EventTableModel(TableModel):
 
     cols = ["Event Index", "Timestamp", "Type", "Type Index", "Subtype"]
 
     INDEX, TIMESTAMP, TYPE, TYPE_INDEX, SUBTYPE = range(5)
+
+    event_names = ["PKT", "TRN", "XFR"]
 
     def rowCount(self, parent):
         return self.capture.num_events
@@ -237,24 +226,24 @@ class EventTableModel(TableModel):
         event = self.capture.events[row]
 
         if col == self.TYPE_INDEX:
-            return event.index
+            return event.id
 
         if col == self.TYPE:
-            return event_names[event.type]
+            return self.event_names[event.type]
 
         if event.type == PACKET:
-            packet = self.capture.packets[event.index]
+            packet = self.capture.packets[event.id]
         elif event.type == TRANSACTION:
-            transaction = self.capture.transactions[event.index]
-            packet_id = transaction.first_packet_index
+            transaction = self.capture.transactions[event.id]
+            packet_id = transaction.first_packet_id
             packet = self.capture.packets[packet_id]
         elif event.type == TRANSFER:
-            entry = self.capture.transfer_index[event.index]
+            entry = self.capture.transfer_index[event.id]
             traffic = self.capture.endpoint_traffic[entry.endpoint_id]
             transfer = traffic.transfers[entry.transfer_id]
-            transaction_id = traffic.transaction_ids[transfer.id_offset]
+            transaction_id = traffic.transaction_ids[transfer.ep_tran_offset]
             transaction = self.capture.transactions[transaction_id]
-            packet_id = transaction.first_packet_index
+            packet_id = transaction.first_packet_id
             packet = self.capture.packets[packet_id]
 
         if col == self.TIMESTAMP:
@@ -263,7 +252,7 @@ class EventTableModel(TableModel):
 
         if col == self.SUBTYPE:
             if event.type in (PACKET, TRANSACTION):
-                return pid_names[packet.pid & 0b1111]
+                return pid_names[packet.pid & PID_MASK]
             elif event.type == TRANSFER:
                 if packet.pid == SETUP:
                     return "CONTROL"
@@ -271,81 +260,3 @@ class EventTableModel(TableModel):
                     return "BULK IN"
                 elif packet.pid == OUT:
                     return "BULK OUT"
-
-
-class EventTreeModel(QAbstractItemModel):
-
-    cols = ["Event"]
-
-    def __init__(self, parent, capture):
-        super().__init__(parent)
-        self.root_item = EventTreeItem.root(capture)
-
-    def item(self, index):
-        if not index.isValid():
-            return self.root_item
-        else:
-            return index.internalPointer()
-
-    def rowCount(self, parent):
-        if parent.column() > 0:
-            return 0
-        return self.item(parent).child_count()
-
-    def columnCount(self, parent):
-        return len(self.cols)
-
-    def headerData(self,section, orientation, role):
-        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
-            return self.cols[section]
-        return None
-
-    def flags(self, index):
-        if not index.isValid():
-            return Qt.NoItemFlags
-        return Qt.ItemIsEnabled | Qt.ItemIsSelectable
-
-    def index(self, row, column, parent):
-        if not self.hasIndex(row, column, parent):
-            return QModelIndex()
-        child_item = self.item(parent).child_item(row)
-        if child_item:
-            return self.createIndex(row, column, child_item)
-        else:
-            return QModelIndex()
-
-    def parent(self, index):
-        item = self.item(index)
-        if self.root_item in (item, item.parent):
-            return QModelIndex()
-        if item.parent.parent:
-            parent_index = item.parent.child_index
-        else:
-            parent_index = 0
-        return self.createIndex(parent_index, 0, item.parent)
-
-    def data(self, index, role):
-        if role == Qt.DisplayRole:
-            return self.item(index).data(index.column())
-
-
-capture = convert_capture(sys.argv[1].encode('ascii'))
-QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
-app = QApplication.instance() or QApplication([])
-ui = QUiLoader().load('analyzer.ui')
-for modelClass, view in (
-        (PacketTableModel, ui.packetView),
-        (TransactionTableModel, ui.transactionView),
-        (TransferTableModel, ui.transferView),
-        (EventTableModel, ui.eventView),
-        (EventTreeModel, ui.eventTreeView)):
-    model = modelClass(app, capture)
-    view.setModel(model)
-    if isinstance(view, QTableView):
-        header = view.horizontalHeader()
-        header.setVisible(True)
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        header.setStretchLastSection(True)
-    view.show()
-ui.show()
-app.exec()
