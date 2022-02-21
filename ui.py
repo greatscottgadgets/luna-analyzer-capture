@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, QCoreApplication, QAbstractTableModel, \
         QAbstractItemModel, QModelIndex
 
 from interface import *
+from treeitem import EventTreeItem
 import faulthandler
 import sys
 
@@ -274,94 +275,13 @@ class EventTableModel(TableModel):
                     return "BULK OUT"
 
 
-class EventTreeItem(object):
+class EventTreeModel(QAbstractItemModel):
 
     cols = ["Event"]
 
-    def __init__(self, capture, item_type,
-            parent_item=None, parent_row=None, item_id=None):
-        self.capture = capture
-        self.item_type = item_type
-        self.parent_item = parent_item
-        self.parent_row = parent_row
-        self.item_id = item_id
-        self.child_cache = {}
-
-    def child(self, row):
-        if row in self.child_cache:
-            return self.child_cache[row]
-        if self.item_type == CAPTURE:
-            event = self.capture.events[row]
-            child = EventTreeItem(self.capture, event.type, self, row, event.index)
-        elif self.item_type == TRANSFER:
-            entry = self.capture.transfer_index[self.item_id]
-            traffic = self.capture.endpoint_traffic[entry.endpoint_id]
-            transfer = traffic.transfers[entry.transfer_id]
-            transaction_id = traffic.transaction_ids[transfer.id_offset + row]
-            child = EventTreeItem(self.capture, TRANSACTION, self, row, transaction_id)
-        elif self.item_type == TRANSACTION:
-            transaction = self.capture.transactions[self.item_id]
-            packet_id = transaction.first_packet_index + row
-            child = EventTreeItem(self.capture, PACKET, self, row, packet_id)
-        self.child_cache[row] = child
-        return child
-
-    def child_count(self):
-        if self.item_type == CAPTURE:
-            return self.capture.num_events
-        if self.item_type == TRANSFER:
-            entry = self.capture.transfer_index[self.item_id]
-            traffic = self.capture.endpoint_traffic[entry.endpoint_id]
-            transfer = traffic.transfers[entry.transfer_id]
-            return transfer.num_transactions
-        if self.item_type == TRANSACTION:
-            transaction = self.capture.transactions[self.item_id]
-            return transaction.num_packets
-        if self.item_type == PACKET:
-            return 0
-
-    def data(self, col):
-        if col != 0:
-            return None
-
-        if self.item_type == TRANSFER:
-            entry = self.capture.transfer_index[self.item_id]
-            ep = self.capture.endpoints[entry.endpoint_id]
-            traffic = self.capture.endpoint_traffic[entry.endpoint_id]
-            transfer = traffic.transfers[entry.transfer_id]
-            transaction_id = traffic.transaction_ids[transfer.id_offset]
-            transaction = self.capture.transactions[transaction_id]
-            packet_id = transaction.first_packet_index
-            packet = self.capture.packets[packet_id]
-            if packet.pid == SETUP:
-                fmt = "Control transfer on %u.%u with %u transactions"
-            elif packet.pid == IN:
-                fmt = "Bulk transfer from %u.%u to host with %u transactions"
-            elif packet.pid == OUT:
-                fmt = "Bulk transfer from host to %u.%u with %u trasactions"
-            return fmt % (ep.address, ep.endpoint, transfer.num_transactions)
-
-        if self.item_type == TRANSACTION:
-            transaction = self.capture.transactions[self.item_id]
-            packet_id = transaction.first_packet_index
-            packet = self.capture.packets[packet_id]
-            if packet.pid == SOF:
-                return "Idle period with %u SOF packets" % transaction.num_packets
-            name = pid_names[packet.pid & 0b1111]
-            return "%s transaction, %u packets" % (name, transaction.num_packets)
-
-        if self.item_type == PACKET:
-            packet = self.capture.packets[self.item_id]
-            name = pid_names[packet.pid & 0b1111]
-            return "%s packet, %u bytes" % (name, packet.length)
-
-
-class EventTreeModel(QAbstractItemModel):
-
     def __init__(self, parent, capture):
         super().__init__(parent)
-        self.capture = capture
-        self.root_item = EventTreeItem(self.capture, CAPTURE)
+        self.root_item = EventTreeItem.root(capture)
 
     def item(self, index):
         if not index.isValid():
@@ -375,11 +295,11 @@ class EventTreeModel(QAbstractItemModel):
         return self.item(parent).child_count()
 
     def columnCount(self, parent):
-        return len(EventTreeItem.cols)
+        return len(self.cols)
 
     def headerData(self,section, orientation, role):
         if role == Qt.DisplayRole and orientation == Qt.Horizontal:
-            return EventTreeItem.cols[section]
+            return self.cols[section]
         return None
 
     def flags(self, index):
@@ -390,7 +310,7 @@ class EventTreeModel(QAbstractItemModel):
     def index(self, row, column, parent):
         if not self.hasIndex(row, column, parent):
             return QModelIndex()
-        child_item = self.item(parent).child(row)
+        child_item = self.item(parent).child_item(row)
         if child_item:
             return self.createIndex(row, column, child_item)
         else:
@@ -398,13 +318,13 @@ class EventTreeModel(QAbstractItemModel):
 
     def parent(self, index):
         item = self.item(index)
-        if self.root_item in (item, item.parent_item):
+        if self.root_item in (item, item.parent):
             return QModelIndex()
-        if item.parent_item.parent_item:
-            parent_index = item.parent_item.parent_row
+        if item.parent.parent:
+            parent_index = item.parent.child_index
         else:
             parent_index = 0
-        return self.createIndex(parent_index, 0, item.parent_item)
+        return self.createIndex(parent_index, 0, item.parent)
 
     def data(self, index, role):
         if role == Qt.DisplayRole:
