@@ -82,17 +82,15 @@ class EventTreeItem(object):
                 fmt = "Bulk transfer from %u.%u to host with %u transactions"
             elif first_packet.pid == OUT:
                 fmt = "Bulk transfer from host to %u.%u with %u trasactions"
-            else:
-                return "Unexpected transfer start PID %s" % pid_names[packet.pid & 0x03]
             return fmt % (ep.address, ep.endpoint_num, transfer.num_transactions)
         elif self.item_type == TRANSACTION:
             transaction = self.capture.transactions[self.item_id]
             first_packet = self.capture.packets[transaction.first_packet_id]
             if first_packet.pid == SOF:
                 return "Idle period with %u SOF packets" % transaction.num_packets
-            name = pid_names[first_packet.pid & 0b1111]
+            name = pid_names[first_packet.pid & PID_MASK]
             return "%s transaction, %u packets" % (name, transaction.num_packets)
         elif self.item_type == PACKET:
             packet = self.capture.packets[self.item_id]
-            name = pid_names[packet.pid & 0b1111]
+            name = pid_names[packet.pid & PID_MASK]
             return "%s packet, %u bytes" % (name, packet.length)

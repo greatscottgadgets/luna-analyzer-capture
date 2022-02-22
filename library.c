@@ -322,10 +322,8 @@ static inline void transfer_start(struct context *context)
 }
 
 // End a transfer if it was ongoing.
-static inline void transfer_end(struct context *context, uint8_t address, uint8_t endpoint_num, bool complete)
+static inline void transfer_end(struct context *context, struct endpoint_state *ep_state, bool complete)
 {
-	struct endpoint_state *ep_state = context->endpoint_states[address][endpoint_num];
-
 	struct transfer *xfer = &ep_state->current_transfer;
 	if (xfer->num_transactions > 0) {
 		// A transfer was in progress, write it out.
@@ -344,19 +342,19 @@ static inline void transfer_update(struct context *context)
 	struct transaction *tran = &context->current_transaction;
 	enum pid transaction_type = context->transaction_state.first;
 
-	if (transaction_type == SOF)
-	{
+	// A transaction consisting of consecutive SOF packets
+	// is placed in the top level event stream directly rather
+	// than being assigned to a transfer.
+	if (transaction_type == SOF) {
 		event_create(context, TRANSACTION);
 		return;
 	}
-
-	uint8_t address = context->transaction_state.address;
-	uint8_t endpoint_num = context->transaction_state.endpoint_num;
 
 	// Get endpoint state.
 	struct endpoint_state *ep_state = endpoint_state(context);
 
 	// Whether this transaction is on the control endpoint.
+	uint8_t endpoint_num = context->transaction_state.endpoint_num;
 	bool control = (endpoint_num == 0);
 
 	// Check effect of this transaction on the transfer state.
@@ -381,7 +379,7 @@ static inline void transfer_update(struct context *context)
 	{
 	case TRANSFER_NEW:
 		// New transfer. End any previous one as incomplete.
-		transfer_end(context, address, endpoint_num, false);
+		transfer_end(context, ep_state, false);
 		event_create(context, TRANSFER);
 		transfer_start(context);
 		break;
@@ -392,11 +390,11 @@ static inline void transfer_update(struct context *context)
 	case TRANSFER_DONE:
 		// Transaction completes current transfer.
 		transfer_append(context, true);
-		transfer_end(context, address, endpoint_num, true);
+		transfer_end(context, ep_state, true);
 		break;
 	case TRANSFER_INVALID:
 		// Transaction not valid as part of any current transfer.
-		transfer_end(context, address, endpoint_num, false);
+		transfer_end(context, ep_state, false);
 		event_create(context, TRANSACTION);
 		break;
 	}
@@ -433,11 +431,15 @@ transaction_status(enum pid first, enum pid last, enum pid next)
 	switch (last)
 	{
 	case NONE:
+		// Treat SOF as the start a "transaction" which can
+		// consist of multiple consecutive SOF packets during
+		// an idle period on the bus.
 		if (next == SOF)
 			return TRANSACTION_NEW;
 		break;
 	case SOF:
-		// Allow any number of SOFs to form a transaction.
+		// Additional SOFs extend the same transaction, any
+		// other PID ends it.
 		if (next == SOF)
 			return TRANSACTION_CONT;
 		break;
@@ -714,7 +716,7 @@ struct capture* convert_capture(const char *filename)
 		struct endpoint_traffic *ep_traf = cap->endpoint_traffic[i];
 
 		// End any transfer still ongoing on this endpoint as incomplete.
-		transfer_end(&context, ep->address, ep->endpoint_num, false);
+		transfer_end(&context, ep_state, false);
 
 		// Map completed files as endpoint traffic arrays.
 		ep_traf->transfers = file_map(&ep_state->transfers);
