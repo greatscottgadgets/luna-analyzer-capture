@@ -28,7 +28,7 @@ int main(int argc, char *argv[])
 		struct endpoint *ep = &capture->endpoints[i];
 		struct endpoint_traffic *traf = capture->endpoint_traffic[i];
 		printf("%u.%u: %lu transfers, %lu transactions\n",
-			ep->address, ep->endpoint,
+			ep->address, ep->endpoint_num,
 			traf->num_transfers, traf->num_transaction_ids);
 	}
 
