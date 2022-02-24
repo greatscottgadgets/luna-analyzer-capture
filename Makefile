@@ -2,12 +2,18 @@ DEPS = libusb-1.0 libpcap
 CFLAGS = -g -Wall $(shell pkg-config --cflags $(DEPS))
 LIBS = $(shell pkg-config --libs $(DEPS))
 
-all: capture luna2pcap decode_test library.so
+OUTPUTS = capture luna2pcap decode_test library.so
+DECODE_OBJS = decode_test.o library.o
+
+all: $(OUTPUTS)
+
+clean:
+	rm -f $(OUTPUTS) $(DECODE_OBJS)
 
 library.so: library.h
 library.o: library.h
 
-decode_test: decode_test.o library.o
+decode_test: $(DECODE_OBJS)
 	gcc $(CFLAGS) $^ -o $@
 
 %: %.c Makefile
