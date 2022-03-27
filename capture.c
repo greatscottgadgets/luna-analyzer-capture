@@ -36,7 +36,9 @@ static libusb_device_handle* usb_device;
 static struct libusb_transfer* usb_transfers[NUM_TRANSFERS];
 static uint8_t usb_buffers[NUM_TRANSFERS][TRANSFER_SIZE];
 static int interrupted = 0;
+static bool capture_started = false;
 static bool capture_stopped = false;
+static int transfers_empty = 0;
 static int transfers_stopped = 0;
 
 void usb_callback(struct libusb_transfer* transfer)
@@ -45,11 +47,15 @@ void usb_callback(struct libusb_transfer* transfer)
 	{
 		case LIBUSB_TRANSFER_COMPLETED:
 		case LIBUSB_TRANSFER_TIMED_OUT:
-			// Write received data to stdout.
-			fwrite(transfer->buffer,
-				transfer->actual_length,
-				1, stdout);
-			if (capture_stopped) {
+			if (capture_started) {
+				// Write received data to stdout.
+				fwrite(transfer->buffer,
+					transfer->actual_length,
+					1, stdout);
+			} else if (transfer->actual_length == 0) {
+				transfers_empty++;
+			}
+			if (capture_stopped && transfer->actual_length == 0) {
 				transfers_stopped++;
 			} else {
 				// Resubmit transfer.
@@ -111,12 +117,21 @@ int main(int argc, char *argv[])
 			TIMEOUT_MS);
 	}
 
+	// Disable capture.
+	set_capture_enable(false);
+
 	// Submit transfers.
 	for (int i = 0; i < NUM_TRANSFERS; i++)
 		CHECK(libusb_submit_transfer(usb_transfers[i]));
 
+	// Handle libusb events until all transfers return empty.
+	while (transfers_empty < NUM_TRANSFERS)
+		CHECK(libusb_handle_events(usb_context));
+
 	// Enable capture.
 	set_capture_enable(true);
+
+	capture_started = true;
 
 	// Handle libusb events until stopped by Ctrl-C.
 	while (!interrupted)
