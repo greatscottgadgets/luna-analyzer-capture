@@ -70,6 +70,7 @@ void usb_callback(struct libusb_transfer* transfer)
 
 void set_capture_enable(bool enable)
 {
+	TO_STDERR("%s capture", enable ? "Enabling" : "Disabling");
 	CHECK(libusb_control_transfer(usb_device,
 		LIBUSB_ENDPOINT_OUT
 			| LIBUSB_REQUEST_TYPE_VENDOR
