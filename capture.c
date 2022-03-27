@@ -62,6 +62,21 @@ void usb_callback(struct libusb_transfer* transfer)
 	}
 }
 
+void set_capture_enable(bool enable)
+{
+	CHECK(libusb_control_transfer(usb_device,
+		LIBUSB_ENDPOINT_OUT
+			| LIBUSB_REQUEST_TYPE_VENDOR
+			| LIBUSB_RECIPIENT_DEVICE,
+		1, // Set state
+		enable,
+		0, // No index
+		NULL, // No data
+		0, // Zero length
+		0 // No timeout
+	));
+}
+
 void interrupt(int signum)
 {
 	interrupted = 1;
@@ -101,34 +116,14 @@ int main(int argc, char *argv[])
 		CHECK(libusb_submit_transfer(usb_transfers[i]));
 
 	// Enable capture.
-	CHECK(libusb_control_transfer(usb_device,
-		LIBUSB_ENDPOINT_OUT
-			| LIBUSB_REQUEST_TYPE_VENDOR
-			| LIBUSB_RECIPIENT_DEVICE,
-		1, // Set state
-		1, // Capture enabled
-		0, // No index
-		NULL, // No data
-		0, // Zero length
-		0 // No timeout
-	));
+	set_capture_enable(true);
 
 	// Handle libusb events until stopped by Ctrl-C.
 	while (!interrupted)
 		CHECK(libusb_handle_events_completed(usb_context, &interrupted));
 
 	// Disable capture.
-	CHECK(libusb_control_transfer(usb_device,
-		LIBUSB_ENDPOINT_OUT
-			| LIBUSB_REQUEST_TYPE_VENDOR
-			| LIBUSB_RECIPIENT_DEVICE,
-		1, // Set state
-		0, // Capture disabled
-		0, // No index
-		NULL, // No data
-		0, // Zero length
-		0 // No timeout
-	));
+	set_capture_enable(false);
 
 	capture_stopped = true;
 
